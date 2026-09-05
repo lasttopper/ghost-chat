@@ -33,6 +33,7 @@ const S = {
   pendingJoinCode: null,
   report: null,                // { convId, messageId, targetUser, preview }
   fb: null,                    // firebase auth bundle or null (guest mode)
+  seenMsg: new Set(),          // message ids already rendered (entrance animation)
 };
 
 let lastRead = {};
@@ -63,8 +64,8 @@ function toast(text, kind = '') {
   el.className = 'toast ' + kind;
   el.textContent = text;
   $('#toasts').appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity .4s'; }, 3600);
-  setTimeout(() => el.remove(), 4100);
+  setTimeout(() => el.classList.add('out'), 3600);
+  setTimeout(() => el.remove(), 4000);
 }
 
 async function copyText(text) {
@@ -485,7 +486,12 @@ function renderMessages() {
     }
     const grouped = prev && !m.system && !prev.system &&
       prev.username === m.username && (m.ts - prev.ts) < GROUP_WINDOW_MS;
-    box.appendChild(m.system ? buildSystem(m) : buildMsg(m, grouped));
+    const fresh = !m.system && !S.seenMsg.has(m.id);
+    if (fresh) {
+      S.seenMsg.add(m.id);
+      if (S.seenMsg.size > 6000) S.seenMsg.clear(); // keep bounded
+    }
+    box.appendChild(m.system ? buildSystem(m) : buildMsg(m, grouped, fresh));
     prev = m;
   }
 }
@@ -500,9 +506,9 @@ function buildSystem(m) {
   return row;
 }
 
-function buildMsg(m, grouped) {
+function buildMsg(m, grouped, fresh) {
   const row = document.createElement('div');
-  row.className = 'msg' + (grouped ? ' grouped' : '');
+  row.className = 'msg' + (grouped ? ' grouped' : '') + (fresh ? ' fresh' : '');
   row.dataset.msgId = m.id;
 
   const avCol = document.createElement('div');
@@ -588,16 +594,20 @@ function scrollBottom(force) {
 /* ------------------------------ conversations ------------------------------ */
 
 function switchConv(id) {
+  closeNav(); // tapping any sidebar item (even the active one) closes the mobile drawer
   if (S.active === id) return;
   S.active = id;
   const conv = getConv(id);
-  if (conv && conv.messages.length) lastRead[id] = conv.messages[conv.messages.length - 1].ts;
-  else lastRead[id] = S.serverNow;
+  if (conv) {
+    if (conv.messages.length) lastRead[id] = conv.messages[conv.messages.length - 1].ts;
+    else lastRead[id] = S.serverNow;
+    conv.messages.forEach((m) => S.seenMsg.add(m.id)); // no entrance anim on switch
+  }
   saveLastRead();
   renderAll();
   scrollBottom(true);
   updatePlaceholder();
-  $('#input').focus();
+  if (window.matchMedia('(hover: hover)').matches) $('#input').focus(); // don't pop the mobile keyboard
 }
 
 function updatePlaceholder() {
@@ -678,6 +688,14 @@ function openPicker(anchor, mode) {
     ? (e) => { const input = $('#input'); input.value += e; input.focus(); }
     : (e) => send({ type: 'react', channelId: mode.convId, messageId: mode.messageId, emoji: e }));
   picker.classList.remove('hidden');
+  if (window.innerWidth <= 560) {
+    // phones: bottom sheet (CSS positions it), skip anchor math
+    picker.classList.add('sheet');
+    picker.style.top = '';
+    picker.style.left = '';
+    return;
+  }
+  picker.classList.remove('sheet');
   const r = anchor.getBoundingClientRect();
   const w = 250, h = picker.offsetHeight || 140;
   let top = r.top - h - 8;
@@ -688,7 +706,9 @@ function openPicker(anchor, mode) {
 }
 
 function closePicker() {
-  $('#emoji-picker').classList.add('hidden');
+  const p = $('#emoji-picker');
+  p.classList.add('hidden');
+  p.classList.remove('sheet');
   S.picker = { mode: null };
 }
 
@@ -996,9 +1016,54 @@ function guestId() {
   return id;
 }
 
+/* ------------------------------ mobile UX wiring ------------------------------ */
+
+function openNav() { document.body.classList.add('nav-open'); }
+function closeNav() { document.body.classList.remove('nav-open'); }
+
+function wireMobileUx() {
+  $('#menu-btn').onclick = openNav;
+  $('#nav-backdrop').onclick = closeNav;
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
+  window.addEventListener('resize', () => { if (window.innerWidth > 720) closeNav(); });
+
+  /* jump-to-latest FAB (appears when scrolled up) */
+  const box = $('#messages');
+  const fab = $('#scroll-bottom');
+  box.addEventListener('scroll', () => {
+    const away = box.scrollHeight - box.scrollTop - box.clientHeight;
+    fab.classList.toggle('hidden', away < 160);
+  }, { passive: true });
+  fab.onclick = () => {
+    box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
+    fab.classList.add('hidden');
+  };
+
+  /* touch devices have no hover: long-press a message for its actions */
+  let pressTimer = null;
+  box.addEventListener('touchstart', (e) => {
+    const row = e.target.closest('.msg');
+    if (!row || row.classList.contains('system')) return;
+    pressTimer = setTimeout(() => {
+      box.querySelectorAll('.actions-open').forEach((n) => n.classList.remove('actions-open'));
+      row.classList.add('actions-open');
+    }, 420);
+  }, { passive: true });
+  const cancelPress = () => { clearTimeout(pressTimer); pressTimer = null; };
+  box.addEventListener('touchmove', cancelPress, { passive: true });
+  box.addEventListener('touchend', (e) => {
+    cancelPress();
+    if (!e.target.closest('.msg-actions')) {
+      box.querySelectorAll('.actions-open').forEach((n) => n.classList.remove('actions-open'));
+    }
+  }, { passive: true });
+}
+
 /* ------------------------------ boot ------------------------------ */
 
 async function boot() {
+  wireMobileUx();
+
   /* service worker: app-shell cache + notification plumbing (PWA/TWA) */
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed:', e));
