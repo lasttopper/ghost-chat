@@ -1,4 +1,4 @@
-/* Pulse — standalone server: HTTP static + WebSocket, state persisted to a JSON file.
+/* Ghost Chat — standalone server: HTTP static + WebSocket, state persisted to a JSON file.
  * (The Vercel entry point lives in api/ws.js; both share core.js.)
  */
 'use strict';
@@ -26,7 +26,7 @@ const digest = require('./digest');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
-const DATA_FILE = process.env.PULSE_DATA || path.join(__dirname, 'data.json');
+const DATA_FILE = process.env.GHOST_DATA || process.env.PULSE_DATA || path.join(__dirname, 'data.json');
 const REPORT_TZ = process.env.REPORT_TZ || 'Asia/Kolkata';
 const REPORT_DIR = process.env.REPORT_DIR || path.join(__dirname, 'reports');
 

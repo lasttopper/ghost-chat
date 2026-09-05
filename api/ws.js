@@ -1,4 +1,4 @@
-/* Pulse — Vercel Function entry point (WebSocket, public beta + Fluid compute).
+/* Ghost Chat — Vercel Function entry point (WebSocket, public beta + Fluid compute).
  *
  * - Serves the WebSocket upgrade at /api/ws using `ws` (noServer + handleUpgrade).
  * - The core instance is a module-level singleton: with Fluid compute the warm

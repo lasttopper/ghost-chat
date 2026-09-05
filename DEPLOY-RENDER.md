@@ -1,6 +1,6 @@
-# Deploying Pulse on Render
+# Deploying Ghost Chat on Render
 
-Render runs Pulse as a **persistent Web Service** — no code changes needed,
+Render runs Ghost Chat as a **persistent Web Service** — no code changes needed,
 WebSockets work natively, and there's no connection-duration cap like Vercel's
 beta. Two paths: the free tier (demo-grade) or Starter + disk (recommended).
 
@@ -8,7 +8,7 @@ beta. Two paths: the free tier (demo-grade) or Starter + disk (recommended).
 
 The repo ships a `render.yaml` blueprint: Node 20, `npm install` /
 `node server.js`, `/healthz` health check, and a **1 GB disk mounted at
-`/var/data`** with `PULSE_DATA=/var/data/data.json` so chat history survives
+`/var/data`** with `GHOST_DATA=/var/data/data.json` so chat history survives
 deploys and restarts.
 
 1. Push this folder to a GitHub repo.
@@ -32,7 +32,7 @@ render.com → **New → Web Service** → connect the repo, then:
 Know the trade-offs before you share the link:
 
 - **Spin-down**: free services sleep after ~15 min idle; the next visitor eats
-  a ~30–60 s cold start. Sleeping kills open WebSocket connections — the Pulse
+  a ~30–60 s cold start. Sleeping kills open WebSocket connections — the Ghost Chat
   client auto-reconnects with backoff and the server's presence grace window
   suppresses "went offline" flapping, so recovery is automatic, just slow.
 - **Ephemeral history**: without a disk, `data.json` resets whenever the
@@ -40,7 +40,7 @@ Know the trade-offs before you share the link:
 - **Quota**: 750 instance-hours/month per workspace, 0.1 CPU / 512 MB RAM.
 
 To switch the blueprint to free: set `plan: free`, delete the `disk:` block
-and the `PULSE_DATA` env var.
+and the `GHOST_DATA` env var.
 
 ## Custom domain
 
@@ -59,6 +59,6 @@ npm test                                          # 35 assertions locally
 
 - Persistent process → true WebSockets, no 5-minute caps, no per-instance
   pinning; one process means everyone is always in sync.
-- Disk → the existing `PULSE_DATA` file persistence works verbatim (same code
+- Disk → the existing `GHOST_DATA` file persistence works verbatim (same code
   path the e2e suite tests).
-- Single instance with a disk is exactly the topology Pulse is designed for.
+- Single instance with a disk is exactly the topology Ghost Chat is designed for.

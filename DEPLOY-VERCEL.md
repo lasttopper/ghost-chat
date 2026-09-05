@@ -1,4 +1,4 @@
-# Deploying Pulse on Vercel
+# Deploying Ghost Chat on Vercel
 
 **Short answer: yes.** Vercel added native WebSocket support (public beta, all
 plans) for Functions running on Fluid compute, and `ws` works with no extra

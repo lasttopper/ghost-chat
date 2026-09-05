@@ -1,4 +1,4 @@
-/* Shared protocol assertions — run against ANY server exposing the Pulse
+/* Shared protocol assertions — run against ANY server exposing the Ghost Chat
  * WebSocket protocol on ws://127.0.0.1:<PORT>/ws (standalone or Vercel
  * handler harness). Returns { passed, failed }. */
 'use strict';

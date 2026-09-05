@@ -1,8 +1,8 @@
-# Deploying Pulse on a DNSExit KVM VPS
+# Deploying Ghost Chat on a DNSExit KVM VPS
 
 DNSExit's **shared web hosting won't work** (PHP/Perl/Python only — no Node.js,
 no long-running processes for WebSockets). Their **KVM VPS** works perfectly:
-it's a self-managed Linux server with full root, so Pulse runs exactly as the
+it's a self-managed Linux server with full root, so Ghost Chat runs exactly as the
 standalone app — no code changes, no Vercel caveats, no connection duration
 caps, and `data.json` persistence just works.
 
@@ -37,7 +37,7 @@ node test/e2e.js   # sanity: 16/16 pass on the VPS itself
 
 ```ini
 [Unit]
-Description=Pulse chat
+Description=Ghost Chat
 After=network.target
 
 [Service]
@@ -100,12 +100,12 @@ crontab -e
 ## Alternative: self-host at home with DNSExit's free DDNS
 
 DNSExit's bread and butter is **free Dynamic DNS + free domains**. If you'd
-rather run Pulse on a machine you own:
+rather run Ghost Chat on a machine you own:
 
 1. Claim a free hostname (e.g. `pulse.yourfree.domain`) via their DDNS.
 2. Run their update client on your router or the host so the name follows
    your changing IP.
-3. Port-forward 443 → your machine, run Pulse + Caddy as above.
+3. Port-forward 443 → your machine, run Ghost Chat + Caddy as above.
 
 Caveats they're upfront about: this breaks if your ISP uses CGNAT or blocks
 inbound ports — their paid "Remote Access" tunnel covers that case. For an
