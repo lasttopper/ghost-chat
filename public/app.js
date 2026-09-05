@@ -948,16 +948,26 @@ function showUsernameSetup(error) {
 function afterAuth() {
   // identity established (firebase or guest) → username step or straight in
   const saved = ls.get('ghost.usernameFor.' + S.me.authId);
+  const savedColor = ls.get('ghost.colorFor.' + S.me.authId);
   if (saved) {
     S.me.username = saved;
-    S.me.color = ls.get('ghost.colorFor.' + S.me.authId) || pickedColor;
+    S.me.color = savedColor || pickedColor;
+    enterApp();
+  } else if (savedColor) {
+    // Returning on this device (the color survived a logout) but no cached
+    // name: enter the app and let the server resolve the username bound to
+    // this authId — no username-setup flash. If the server has lost the
+    // record it replies need_username and we show the setup from there.
+    S.me.username = null;
+    S.me.color = savedColor;
     enterApp();
   } else {
-    // No local memory of the name (fresh device or after logout): let the
-    // server resolve the username bound to this authId. If it has never
-    // seen this identity it answers 'need_username' and we show the setup.
+    // Brand-new identity (no name AND no color stored): go straight to the
+    // username setup. A fresh guest is per-browser and a first-time Firebase
+    // signup has nothing for the server to resolve yet, so there is nothing
+    // to wait for — and this avoids flashing the empty app shell first.
     S.me.username = null;
-    enterApp();
+    showUsernameSetup('');
   }
 }
 
