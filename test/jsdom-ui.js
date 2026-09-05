@@ -10,12 +10,25 @@ vc.on('jsdomError', (e) => errors.push('jsdomError: ' + e.message));
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/* jsdom has no window.matchMedia — real browsers all do; shim it so the
+ * app's device-capability checks behave like production. */
+function shimMatchMedia(w) {
+  if (!w.matchMedia) {
+    w.matchMedia = (q) => ({
+      matches: false, media: q,
+      addListener() {}, removeListener() {},
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+    });
+  }
+}
+
 (async () => {
   const dom = await JSDOM.fromURL(url, {
     runScripts: 'dangerously',
     resources: 'usable',
     pretendToBeVisual: true,
     virtualConsole: vc,
+    beforeParse: shimMatchMedia,
   });
   const { window } = dom;
   const $ = (s) => window.document.querySelector(s);

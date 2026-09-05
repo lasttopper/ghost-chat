@@ -616,7 +616,9 @@ function switchConv(id) {
   renderAll();
   scrollBottom(true);
   updatePlaceholder();
-  if (window.matchMedia('(hover: hover)').matches) $('#input').focus(); // don't pop the mobile keyboard
+  let hover = false;
+  try { hover = window.matchMedia('(hover: hover)').matches; } catch {}
+  if (hover) $('#input').focus(); // don't pop the mobile keyboard
 }
 
 function updatePlaceholder() {

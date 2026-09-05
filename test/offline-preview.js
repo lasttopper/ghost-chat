@@ -22,6 +22,18 @@ function vcFor(tag) {
   return vc;
 }
 
+/* jsdom has no window.matchMedia — real browsers all do; shim it so the
+ * app's device-capability checks behave like production. */
+function shimMatchMedia(w) {
+  if (!w.matchMedia) {
+    w.matchMedia = (q) => ({
+      matches: false, media: q,
+      addListener() {}, removeListener() {},
+      addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; },
+    });
+  }
+}
+
 let server;
 function startServer() {
   server = spawn('node', ['server.js'], {
@@ -41,6 +53,7 @@ function stopServer() { try { server.kill('SIGKILL'); } catch {} }
   const dom = await JSDOM.fromURL(BASE, {
     runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true,
     virtualConsole: vcFor('online'),
+    beforeParse: shimMatchMedia,
   });
   const { window } = dom;
   const $ = (s) => window.document.querySelector(s);
@@ -92,6 +105,7 @@ function stopServer() { try { server.kill('SIGKILL'); } catch {} }
     url: BASE, runScripts: 'dangerously', pretendToBeVisual: true,
     virtualConsole: vcFor('offline'),
     beforeParse(w) {
+      shimMatchMedia(w);
       for (const [k, v] of Object.entries(seed)) w.localStorage.setItem(k, v);
     },
   });
