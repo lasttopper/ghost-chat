@@ -32,7 +32,9 @@
   "alphaDependencies": { "enabled": false },
   "additionalTrustedOrigins": [],
   "retainedBundles": [],
-  "fingerprints": [],
+  "fingerprints": [
+    "28:3E:21:7D:C3:91:62:D7:C1:FB:82:67:4C:EC:75:73:1E:C5:0C:0D:A9:59:6F:29:80:FB:77:5A:76:18:76:CE"
+  ],
   "isChromeOSOnly": false,
   "isMetaQuest": false
 }

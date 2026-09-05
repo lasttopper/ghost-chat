@@ -3,3 +3,4 @@ data.json
 .env
 *.log
 reports/
+twa/android.keystore

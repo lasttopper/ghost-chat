@@ -4,14 +4,18 @@
 # Runs on GitHub's ubuntu runners (JDK + Android SDK preinstalled).
 # Trigger: manual (Actions tab → "Build Android APK") or on v* tags.
 #
-# PAGES host resolution: uses the PAGES_URL repo variable if set, otherwise
-# https://<owner>.github.io/<repo>. The frontend must be deployed there
-# (see pages.yml) before the APK is useful on a device.
+# Host resolution (deep links + TWA origin): uses the APP_URL repo variable
+# (currently the Render backend, which also serves the frontend), then
+# PAGES_URL, else https://<owner>.github.io/<repo>. The chosen host must
+# serve /.well-known/assetlinks.json (see public/.well-known/) so verified
+# App Links deep-link into the APK; when the APK isn't installed the same
+# links fall back to the web app in the browser.
 #
 # Signing: uses the TWA_KEYSTORE_BASE64 secret (+ TWA_KEYSTORE_PASSWORD /
-# TWA_KEY_PASSWORD) when present — recommended, keeps one stable signing key.
-# Otherwise generates a throwaway keystore (fine for sideloaded test builds;
-# each run then needs uninstall-before-reinstall).
+# TWA_KEY_PASSWORD) when present — REQUIRED for stable deep links (the
+# assetlinks fingerprint must match the signing key). Otherwise generates a
+# throwaway keystore (each run then needs uninstall-before-reinstall and
+# deep links will NOT verify).
 
 name: Build Android APK
 
@@ -31,10 +35,11 @@ jobs:
         with:
           node-version: 20
 
-      - name: Resolve Pages host
+      - name: Resolve app host
         id: pages
         run: |
-          URL="${{ vars.PAGES_URL }}"
+          URL="${{ vars.APP_URL }}"
+          if [ -z "$URL" ]; then URL="${{ vars.PAGES_URL }}"; fi
           if [ -z "$URL" ]; then
             URL="https://$(echo '${{ github.repository_owner }}' | tr 'A-Z' 'a-z').github.io/$(echo '${{ github.event.repository.name }}' | tr 'A-Z' 'a-z')"
           fi
