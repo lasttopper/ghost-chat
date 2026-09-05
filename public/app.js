@@ -222,7 +222,11 @@ function connect() {
     route(msg);
   };
   S.ws.onclose = () => {
-    $('#reconnect-banner').classList.remove('hidden');
+    const banner = $('#reconnect-banner');
+    banner.textContent = (S.channels.length || S.dms.length)
+      ? 'Offline — showing saved messages. Reconnecting…'
+      : 'Connection lost — reconnecting…';
+    banner.classList.remove('hidden');
     const st = $('#me-status');
     if (st) { st.textContent = 'reconnecting…'; st.classList.add('offline'); }
     setTimeout(connect, S.reconnectDelay);
@@ -230,7 +234,10 @@ function connect() {
   };
 }
 
-const send = (obj) => { if (S.ws && S.ws.readyState === 1) S.ws.send(JSON.stringify(obj)); };
+const send = (obj) => {
+  if (S.ws && S.ws.readyState === 1) { S.ws.send(JSON.stringify(obj)); return true; }
+  return false;
+};
 
 function route(msg) {
   switch (msg.type) {
@@ -307,6 +314,8 @@ function route(msg) {
     case 'username_taken': showUsernameSetup(`@${msg.username} belongs to another account. Pick a different one.`); break;
     case 'error': toast(msg.message); break;
   }
+  // keep the offline preview mirror fresh (typing events are too noisy)
+  if (msg.type !== 'typing' && msg.type !== 'typing_stop') queueCacheSave();
 }
 
 function onMessage(m) {
@@ -732,7 +741,10 @@ function sendMessage() {
   const input = $('#input');
   const text = input.value.trim();
   if (!text || !S.active) return;
-  send({ type: 'message', channel: S.active, text });
+  if (!send({ type: 'message', channel: S.active, text })) {
+    toast("You're offline — message not sent. It's still in the box.");
+    return; // keep the draft so nothing is lost
+  }
   input.value = '';
   input.style.height = 'auto';
   clearTimeout(S.typingStopTimer);
@@ -892,6 +904,55 @@ function submitUsername() {
   enterApp();
 }
 
+/* ------------------------------ offline preview ------------------------------
+ * The last conversations are mirrored into localStorage so the app can show
+ * previously seen content with no connection (Play Store reviewers + planes).
+ * Live data always wins: the first `init` after reconnecting replaces it. */
+
+const OFFLINE_KEY = 'ghost.offlineCache.v1';
+const OFFLINE_PER_CONV = 60;
+
+function saveOfflineCache() {
+  try {
+    const convs = {};
+    for (const conv of [...S.channels, ...S.dms]) {
+      convs[conv.id] = (conv.messages || []).slice(-OFFLINE_PER_CONV);
+    }
+    ls.set(OFFLINE_KEY, JSON.stringify({
+      channels: S.channels, dms: S.dms, users: S.users,
+      serverNow: S.serverNow, convs, savedAt: Date.now(),
+    }));
+  } catch {} // storage full / unavailable — offline preview is best-effort
+}
+
+let cacheSaveTimer = null;
+function queueCacheSave() {
+  clearTimeout(cacheSaveTimer);
+  cacheSaveTimer = setTimeout(saveOfflineCache, 600);
+}
+
+function loadOfflineCache() {
+  let cache = null;
+  try { cache = JSON.parse(ls.get(OFFLINE_KEY) || 'null'); } catch {}
+  if (!cache || !Array.isArray(cache.channels)) return false;
+  if (!cache.channels.length && !(cache.dms || []).length) return false;
+  S.channels = cache.channels;
+  S.dms = cache.dms || [];
+  S.users = cache.users || {};
+  S.online = new Set();               // nobody is "online" while offline
+  S.serverNow = cache.serverNow || Date.now();
+  for (const conv of [...S.channels, ...S.dms]) {
+    conv.messages = (cache.convs && cache.convs[conv.id]) || [];
+    if (!S.typing[conv.id]) S.typing[conv.id] = new Map();
+  }
+  if (!S.active || !getConv(S.active)) {
+    S.active = (S.channels[0] || S.dms[0] || {}).id || null;
+  }
+  renderAll();
+  scrollBottom(true);
+  return true;
+}
+
 function enterApp() {
   hideAllScreens();
   $('#app').classList.remove('hidden');
@@ -900,6 +961,7 @@ function enterApp() {
   if (S.pendingJoinCode) {
     try { history.replaceState(null, '', location.pathname); } catch {}
   }
+  loadOfflineCache(); // show saved conversations until the socket delivers live data
   connect();
 }
 

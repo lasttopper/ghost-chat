@@ -60,6 +60,10 @@ jobs:
           sed -i "s|\"startUrl\": \"/\"|\"startUrl\": \"${{ steps.pages.outputs.start_url }}\"|" twa/twa-manifest.json
           cat twa/twa-manifest.json
 
+      - name: Auto-bump versionCode (Play requires a unique code per upload)
+        run: |
+          sed -i "s/\"appVersionCode\": [0-9]*/\"appVersionCode\": $GITHUB_RUN_NUMBER/" twa/twa-manifest.json
+
       - name: Prepare signing keystore
         run: |
           cd twa
