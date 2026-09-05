@@ -953,7 +953,38 @@ function afterAuth() {
     S.me.username = saved;
     S.me.color = savedColor || pickedColor;
     enterApp();
-  } else if (savedColor) {
+    return;
+  }
+  // Firebase-backed recovery: the chosen username was stamped onto the
+  // Firebase profile (displayName) when it was picked. That lives in Firebase
+  // Auth, so it survives server restarts AND follows the account to any
+  // device. Adopt it when it's a valid handle (a raw Google display name like
+  // "Jane Doe" won't match, so first-timers still see the setup screen).
+  if (S.me.mode === 'firebase' && S.fb && S.fb.authMod) {
+    try {
+      const cur = S.fb.authMod.currentUser(S.fb.auth);
+      const fbName = String((cur && cur.displayName) || '').toLowerCase().trim();
+      if (/^[a-z0-9_]{3,20}$/.test(fbName)) {
+        S.me.username = fbName;
+        S.me.color = savedColor || pickedColor;
+        ls.set('ghost.usernameFor.' + S.me.authId, fbName); // cache for next boot
+        enterApp();
+        return;
+      }
+    } catch {}
+  }
+  // Client-side recovery copy (survives logout): lets a returning user — guest
+  // included — resume without the setup screen even if the server's ephemeral
+  // memory was wiped. Re-cached as usernameFor so the next boot auto-resumes.
+  const known = ls.get('ghost.knownName.' + S.me.authId);
+  if (known) {
+    S.me.username = known;
+    S.me.color = savedColor || pickedColor;
+    ls.set('ghost.usernameFor.' + S.me.authId, known);
+    enterApp();
+    return;
+  }
+  if (savedColor) {
     // Returning on this device (the color survived a logout) but no cached
     // name: enter the app and let the server resolve the username bound to
     // this authId — no username-setup flash. If the server has lost the
@@ -1115,6 +1146,12 @@ function renderMe() {
         .forEach((k) => localStorage.removeItem(k));
     } catch {}
     try { Object.keys(mem).filter((k) => !keep.test(k)).forEach((k) => { delete mem[k]; }); } catch {}
+    // Keep a recovery copy of the chosen name so logging back in never re-asks
+    // for it — works for guests even when the server's memory was wiped. Set
+    // after the wipe so it isn't cleared; afterAuth adopts it on next login.
+    if (S.me && S.me.username && S.me.authId) {
+      ls.set('ghost.knownName.' + S.me.authId, S.me.username);
+    }
     location.reload();
   };
   card.append(av, info, notif, out);

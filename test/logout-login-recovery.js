@@ -1,11 +1,17 @@
-/* Logout → login recovery test (jsdom, two fresh page loads vs real server):
- * Phase A: guest login + pick username + logout -> localStorage must keep
- *          ghostId+color but drop usernameFor (that's the reported bug:
- *          logout wiped everything, forcing username setup on every login).
- * Phase B: brand-new page with only the kept keys seeded -> click
- *          "Continue as guest" -> server resolves the username by authId,
- *          app must open WITHOUT the username-setup screen and #me-name
- *          must show the original name.
+/* Logout → login recovery test (jsdom, multiple fresh page loads vs a real
+ * server). Verifies the reported bug is fixed: logging out then back in must
+ * NOT force the username-setup screen again.
+ *
+ * Phase A: guest login + pick username + logout.
+ *          localStorage must KEEP ghostId + colorFor + a knownName recovery
+ *          copy, and DROP usernameFor + autoAuth (so the login screen still
+ *          shows instead of silently auto-resuming).
+ * Phase B: brand-new page seeded with the REAL post-logout state
+ *          (guestId + colorFor + knownName) → click "Continue as guest" →
+ *          the client adopts knownName locally (no server needed), so this
+ *          works even if the server's ephemeral memory was wiped.
+ * Phase C: brand-new page seeded WITHOUT knownName (guestId + colorFor only)
+ *          → falls back to the server resolving the username by authId.
  * Usage: node test/logout-login-recovery.js [url]
  */
 'use strict';
@@ -27,7 +33,7 @@ function shimMatchMedia(w) {
   }
 }
 
-function makeConsole(seed) {
+function makeConsole() {
   const vc = new VirtualConsole();
   // ignore jsdom's "Not implemented: navigation" from location.reload()
   vc.on('jsdomError', (e) => {
@@ -90,13 +96,40 @@ async function bootPage(seed) {
 
     ok(window.localStorage.getItem('ghost.guestId') === gid, 'logout KEEPS guestId');
     ok(window.localStorage.getItem('ghost.colorFor.' + gid) === color, 'logout KEEPS colorFor');
+    ok(window.localStorage.getItem('ghost.knownName.' + gid) === username, 'logout KEEPS a knownName recovery copy');
     ok(window.localStorage.getItem('ghost.usernameFor.' + gid) === null, 'logout drops usernameFor');
     ok(window.localStorage.getItem('ghost.autoAuth') === null, 'logout drops autoAuth');
     dom.window.close();
   }
 
-  /* ---------------- Phase B: login again, same identity ---------------- */
-  console.log('phase B: re-login with kept identity (no saved username)');
+  /* -------- Phase B: re-login with the real post-logout state -------- */
+  console.log('phase B: re-login with kept identity + knownName (client-side recovery)');
+  {
+    const dom = await bootPage({
+      'ghost.guestId': gid,
+      ['ghost.colorFor.' + gid]: color,
+      ['ghost.knownName.' + gid]: username,
+    });
+    const { window } = dom;
+    const $ = (s) => window.document.querySelector(s);
+    const vis = (s) => { const el = $(s); return !!el && !el.classList.contains('hidden'); };
+
+    await wait(2500);
+    ok(vis('#login'), 'login screen shown (no silent auto-resume after logout)');
+
+    $('#guest-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await wait(3000);
+
+    ok(vis('#app'), 'app shell visible after re-login');
+    ok(!vis('#username-setup'), 'username-setup NOT shown (knownName adopted)');
+    ok(meName(window.document) === '@' + username + ' (guest)', '#me-card .me-name recovered @' + username + ' (got ' + meName(window.document) + ')');
+    ok(window.localStorage.getItem('ghost.usernameFor.' + gid) === username, 'usernameFor re-cached locally');
+    ok($('#me-card .avatar').textContent !== '…', 'avatar no longer placeholder (got ' + $('#me-card .avatar').textContent + ')');
+    dom.window.close();
+  }
+
+  /* -------- Phase C: no knownName → server resolves by authId -------- */
+  console.log('phase C: re-login without knownName (server-side fallback)');
   {
     const dom = await bootPage({ 'ghost.guestId': gid, ['ghost.colorFor.' + gid]: color });
     const { window } = dom;
@@ -104,16 +137,12 @@ async function bootPage(seed) {
     const vis = (s) => { const el = $(s); return !!el && !el.classList.contains('hidden'); };
 
     await wait(2500);
-    ok(vis('#login'), 'login screen shown (no silent auto-resume without saved username)');
-
     $('#guest-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await wait(3000);
 
     ok(vis('#app'), 'app shell visible after re-login');
-    ok(!vis('#username-setup'), 'username-setup NOT shown (server resolved the name)');
-    ok(meName(window.document) === '@' + username + ' (guest)', '#me-card .me-name recovered @' + username + ' (got ' + meName(window.document) + ')');
-    ok(window.localStorage.getItem('ghost.usernameFor.' + gid) === username, 'usernameFor re-cached locally');
-    ok($('#me-card .avatar').textContent !== '…', 'avatar no longer placeholder (got ' + $('#me-card .avatar').textContent + ')');
+    ok(!vis('#username-setup'), 'username-setup NOT shown (server resolved by authId)');
+    ok(meName(window.document) === '@' + username + ' (guest)', '#me-card .me-name recovered @' + username + ' via server (got ' + meName(window.document) + ')');
     dom.window.close();
   }
 
