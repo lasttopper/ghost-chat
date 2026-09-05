@@ -82,6 +82,13 @@ jobs:
           printf '{"jdkPath":"%s","androidSdkPath":"%s"}' "$JAVA_HOME" "$ANDROID_HOME" > "$HOME/.bubblewrap/config.json"
           cat "$HOME/.bubblewrap/config.json"
 
+      - name: Link cmdline-tools so Bubblewrap validates the SDK
+        run: |
+          # Bubblewrap requires <sdk>/tools or <sdk>/bin; runner images keep
+          # the tools in cmdline-tools/latest. Symlink so validatePath passes
+          # and sdkmanager is found at <sdk>/tools/bin/sdkmanager.
+          ln -sfn "$ANDROID_HOME/cmdline-tools/latest" "$ANDROID_HOME/tools"
+
       - name: Generate Android project and build APK
         env:
           BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.TWA_KEYSTORE_PASSWORD || 'ghostchat' }}
