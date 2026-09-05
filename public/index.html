@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pulse — team chat</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236366f1'/%3E%3Cpath d='M7 17h4l3-7 4 12 3-7h4' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ===== Login screen ===== -->
+  <div id="login" class="login hidden">
+    <div class="login-card">
+      <div class="login-logo">
+        <svg viewBox="0 0 32 32" width="44" height="44"><rect width="32" height="32" rx="8" fill="#6366f1"/><path d="M7 17h4l3-7 4 12 3-7h4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h1>Pulse</h1>
+      <p class="muted">Team messaging, in real time.</p>
+      <input id="login-name" maxlength="20" placeholder="Your display name" autocomplete="off" autofocus>
+      <div id="login-colors" class="swatches"></div>
+      <button id="login-btn" class="primary-btn">Join the workspace</button>
+    </div>
+  </div>
+
+  <!-- ===== App shell ===== -->
+  <div id="app" class="app hidden">
+    <aside class="sidebar">
+      <div class="ws-header">
+        <div class="ws-logo">
+          <svg viewBox="0 0 32 32" width="30" height="30"><rect width="32" height="32" rx="8" fill="#6366f1"/><path d="M7 17h4l3-7 4 12 3-7h4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+        <div class="ws-meta">
+          <div class="ws-name">Pulse</div>
+          <div class="ws-sub" id="online-count">connecting…</div>
+        </div>
+      </div>
+
+      <div class="side-section grow">
+        <div class="side-title">
+          <span>Channels</span>
+          <button id="add-channel" class="side-add" title="Create a channel">＋</button>
+        </div>
+        <div id="channel-list" class="side-list"></div>
+
+        <div class="side-title team-title"><span>Team</span></div>
+        <div id="team-list" class="side-list"></div>
+      </div>
+
+      <div class="me-card" id="me-card"></div>
+    </aside>
+
+    <main class="main">
+      <div id="reconnect-banner" class="banner hidden">Connection lost — reconnecting…</div>
+      <header class="channel-header">
+        <div class="ch-title"><span class="hash">#</span><span id="ch-name"></span></div>
+        <div id="ch-topic" class="ch-topic"></div>
+      </header>
+      <div id="messages" class="messages"></div>
+      <div id="typing-bar" class="typing-bar"></div>
+      <div class="composer">
+        <textarea id="input" rows="1" placeholder="Message #general"></textarea>
+        <div class="composer-right">
+          <button id="emoji-btn" class="icon-btn" title="Insert emoji">🙂</button>
+          <button id="send-btn" class="send-btn" title="Send message">➤</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- shared emoji picker -->
+  <div id="emoji-picker" class="emoji-picker hidden"></div>
+
+  <!-- toasts -->
+  <div id="toasts" class="toasts"></div>
+
+  <!-- create-channel modal -->
+  <div id="modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <h3>Create a channel</h3>
+      <p class="muted">Lowercase letters, numbers and hyphens.</p>
+      <input id="new-channel-name" maxlength="21" placeholder="e.g. design-team" autocomplete="off">
+      <div class="modal-actions">
+        <button id="modal-cancel">Cancel</button>
+        <button id="modal-create" class="primary-btn">Create</button>
+      </div>
+    </div>
+  </div>
+
+<script src="app.js"></script>
+</body>
+</html>

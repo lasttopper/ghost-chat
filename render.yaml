@@ -1,0 +1,28 @@
+# Render Blueprint — deploys Pulse as a Web Service.
+# Dashboard → New → Blueprint → pick this repo, and this whole file applies.
+#
+# Configured for the RECOMMENDED setup: paid Starter instance (~$7/mo, never
+# spins down) + 1 GB persistent disk so chat history survives deploys.
+#
+# Want the free tier instead? Change `plan: starter` to `plan: free` and
+# delete the `disk:` block and the PULSE_DATA env var. Caveats: the service
+# spins down after ~15 min idle (clients auto-reconnect, ~30-60s cold start)
+# and history resets on restart. See DEPLOY-RENDER.md.
+services:
+  - type: web
+    name: pulse-chat
+    runtime: node
+    plan: starter
+    region: oregon
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: 20.20.2
+      - key: PULSE_DATA
+        value: /var/data/data.json
+    disk:
+      name: pulse-data
+      mountPath: /var/data
+      sizeGB: 1

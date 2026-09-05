@@ -1,0 +1,73 @@
+/* Pulse — standalone server: HTTP static + WebSocket, state persisted to a JSON file.
+ * (The Vercel entry point lives in api/ws.js; both share core.js.)
+ */
+'use strict';
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { WebSocketServer } = require('ws');
+const { createCore, attachHeartbeat } = require('./core');
+
+const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
+const DATA_FILE = process.env.PULSE_DATA || path.join(__dirname, 'data.json');
+
+/* ------------------------------ persistence ------------------------------ */
+
+const persistence = {
+  async load() {
+    try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch { return null; }
+  },
+  async save(state) { await fs.promises.writeFile(DATA_FILE, JSON.stringify(state)); },
+  saveSync(state) { fs.writeFileSync(DATA_FILE, JSON.stringify(state)); },
+};
+
+const core = createCore(persistence);
+
+/* --------------------------- http static server --------------------------- */
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.json': 'application/json; charset=utf-8',
+};
+
+const server = http.createServer((req, res) => {
+  let pathname;
+  try { pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname); }
+  catch { res.writeHead(400).end('Bad request'); return; }
+  if (pathname === '/healthz') {
+    res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }));
+    return;
+  }
+  if (pathname === '/') pathname = '/index.html';
+  const filePath = path.normalize(path.join(PUBLIC_DIR, pathname));
+  if (!filePath.startsWith(PUBLIC_DIR + path.sep) && filePath !== PUBLIC_DIR) {
+    res.writeHead(404).end('Not found'); return;
+  }
+  fs.readFile(filePath, (err, data) => {
+    if (err) { res.writeHead(404).end('Not found'); return; }
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
+      'Cache-Control': 'no-store',
+    }).end(data);
+  });
+});
+
+/* ------------------------------ websockets ------------------------------ */
+
+const wss = new WebSocketServer({ server, path: '/ws' });
+wss.on('connection', (ws) => core.onConnection(ws));
+attachHeartbeat(wss);
+
+process.on('SIGTERM', () => { core.flush(); process.exit(0); });
+process.on('SIGINT',  () => { core.flush(); process.exit(0); });
+
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Pulse listening on http://0.0.0.0:${PORT}`);
+});
