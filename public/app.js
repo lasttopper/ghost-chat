@@ -934,7 +934,20 @@ function wireFirebaseUi() {
 
   const fail = (e) => {
     const el = $('#auth-error');
-    el.textContent = (e && e.message) ? e.message.replace('Firebase: ', '') : 'Sign-in failed';
+    if (e && e.code === 'auth/popup-closed-by-user') return;
+    const friendly = {
+      'auth/unauthorized-domain': 'Google sign-in is not enabled for this site yet. Add "' + location.hostname + '" under Firebase Console → Authentication → Settings → Authorized domains.',
+      'auth/popup-blocked': 'Your browser blocked the sign-in popup — allow popups for this site and try again.',
+      'auth/invalid-credential': 'Incorrect email or password.',
+      'auth/wrong-password': 'Incorrect email or password.',
+      'auth/user-not-found': 'No account found for that email — try the Sign up tab.',
+      'auth/email-already-in-use': 'That email already has an account — use the Sign in tab.',
+      'auth/weak-password': 'Password should be at least 6 characters.',
+      'auth/invalid-email': 'That email address does not look valid.',
+      'auth/network-request-failed': 'Network error — check your connection and try again.',
+    };
+    el.textContent = (e && friendly[e.code])
+      || ((e && e.message) ? e.message.replace('Firebase: ', '') : 'Sign-in failed');
     el.classList.remove('hidden');
   };
   const success = (cred) => {
