@@ -128,4 +128,5 @@ jobs:
             --title "Ghost Chat $TAG" \
             --notes "Ghost Chat for Android (TWA). Invite links on ghost-chat-5gxc.onrender.com deep-link into the app; when it isn't installed they fall back to the web app." \
             --target "$GITHUB_SHA" --latest || true
-          gh release upload "$TAG" ghost-chat.apk ghost-chat.aab --clobber --latest
+          gh release upload "$TAG" ghost-chat.apk ghost-chat.aab --clobber
+          gh release edit "$TAG" --latest
