@@ -113,6 +113,9 @@ npm test               # standalone + vercel + digest + firebase = 98 assertions
   [DEPLOY-VERCEL.md](DEPLOY-VERCEL.md).
 - **DNSExit:** KVM VPS only (shared hosting won't run Node). See
   [DEPLOY-DNSEXIT.md](DEPLOY-DNSEXIT.md).
+- **GitHub:** Pages can host the *frontend only* (static host — no Node, no
+  WebSockets); pair it with any backend via `BACKEND_URL`. CI runs the full
+  test suite on every push. See [DEPLOY-GITHUB.md](DEPLOY-GITHUB.md).
 
 ## Architecture
 

@@ -127,8 +127,13 @@ async function loadFirebase() {
 /* ------------------------------ websocket ------------------------------ */
 
 function wsUrl() {
-  const path = /\.vercel\.app$/i.test(location.hostname) ? '/api/ws' : '/ws';
-  return (location.protocol === 'https:' ? 'wss' : 'ws') + '://' + location.host + path;
+  // Optional split hosting: frontend on GitHub Pages (or anywhere static),
+  // backend on Render/Railway/etc. Otherwise same-origin.
+  const backend = String(window.GHOST_BACKEND || '').trim();
+  const base = backend ? new URL(backend) : new URL(location.href);
+  const isVercel = /\.vercel\.app$/i.test(base.hostname);
+  const proto = base.protocol === 'https:' ? 'wss' : 'ws';
+  return `${proto}://${base.host}${isVercel ? '/api/ws' : '/ws'}`;
 }
 
 function connect() {

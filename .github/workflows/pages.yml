@@ -1,0 +1,49 @@
+# Publishes the FRONTEND (public/) to GitHub Pages.
+#
+# GitHub Pages is static-only — it cannot run the WebSocket server. This
+# workflow is for the split setup: UI on Pages, backend on Render/Railway/
+# any Node host. Set the repository variable BACKEND_URL (Settings →
+# Secrets and variables → Actions → Variables) to your backend origin,
+# e.g. https://ghost-chat.onrender.com — it is injected at build time.
+
+name: Deploy frontend to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Point frontend at backend
+        if: ${{ vars.BACKEND_URL != '' }}
+        run: sed -i "s|window.GHOST_BACKEND = '';|window.GHOST_BACKEND = '${{ vars.BACKEND_URL }}';|" public/backend-config.js
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
