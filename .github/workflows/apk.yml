@@ -1,0 +1,88 @@
+# Builds the Ghost Chat Android APK — a Trusted Web Activity (TWA) wrapping
+# the GitHub Pages frontend, so the Web Notifications API works natively.
+#
+# Runs on GitHub's ubuntu runners (JDK + Android SDK preinstalled).
+# Trigger: manual (Actions tab → "Build Android APK") or on v* tags.
+#
+# PAGES host resolution: uses the PAGES_URL repo variable if set, otherwise
+# https://<owner>.github.io/<repo>. The frontend must be deployed there
+# (see pages.yml) before the APK is useful on a device.
+#
+# Signing: uses the TWA_KEYSTORE_BASE64 secret (+ TWA_KEYSTORE_PASSWORD /
+# TWA_KEY_PASSWORD) when present — recommended, keeps one stable signing key.
+# Otherwise generates a throwaway keystore (fine for sideloaded test builds;
+# each run then needs uninstall-before-reinstall).
+
+name: Build Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Resolve Pages host
+        id: pages
+        run: |
+          URL="${{ vars.PAGES_URL }}"
+          if [ -z "$URL" ]; then
+            URL="https://$(echo '${{ github.repository_owner }}' | tr 'A-Z' 'a-z').github.io/$(echo '${{ github.event.repository.name }}' | tr 'A-Z' 'a-z')"
+          fi
+          HOST=$(echo "$URL" | sed -E 's#^https?://##; s#/$##')
+          BASE_PATH=$(echo "$URL" | sed -E 's#^https?://[^/]+##; s#/$##')
+          [ -z "$BASE_PATH" ] && BASE_PATH="/"
+          echo "host=$HOST" >> "$GITHUB_OUTPUT"
+          echo "start_url=$BASE_PATH/" >> "$GITHUB_OUTPUT"
+
+      - name: Inject Pages host into TWA manifest
+        run: |
+          sed -i "s|PAGES_HOST|${{ steps.pages.outputs.host }}|g" twa/twa-manifest.json
+          sed -i "s|\"startUrl\": \"/\"|\"startUrl\": \"${{ steps.pages.outputs.start_url }}\"|" twa/twa-manifest.json
+          cat twa/twa-manifest.json
+
+      - name: Prepare signing keystore
+        run: |
+          cd twa
+          if [ -n "${{ secrets.TWA_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.TWA_KEYSTORE_BASE64 }}" | base64 -d > android.keystore
+          else
+            keytool -genkeypair -v \
+              -keystore android.keystore -alias android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass ghostchat -keypass ghostchat \
+              -dname "CN=Ghost Chat, OU=Dev, O=Ghost, L=NA, S=NA, C=IN"
+          fi
+
+      - name: Install Bubblewrap
+        run: npm i -g @bubblewrap/cli
+
+      - name: Point Bubblewrap at runner JDK + Android SDK
+        run: bubblewrap updateConfig --jdkPath="$JAVA_HOME" --androidSdkPath="$ANDROID_HOME"
+
+      - name: Generate Android project and build APK
+        env:
+          BUBBLEWRAP_KEYSTORE_PASSWORD: ${{ secrets.TWA_KEYSTORE_PASSWORD || 'ghostchat' }}
+          BUBBLEWRAP_KEY_PASSWORD: ${{ secrets.TWA_KEY_PASSWORD || 'ghostchat' }}
+        run: |
+          cd twa
+          bubblewrap update --skipVersionUpgrade
+          bubblewrap build --skipPwaValidation
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ghost-chat-apk
+          path: |
+            twa/app-release-signed.apk
+            twa/app-release-bundle.aab
+          if-no-files-found: error

@@ -100,6 +100,27 @@ npm test               # standalone + vercel + digest + firebase = 98 assertions
 
 ## Deploy
 
+**Chosen architecture:** backend on **Render**, frontend on **GitHub Pages**,
+Android **APK** (TWA) built by GitHub Actions wrapping the Pages frontend —
+see [BUILD-APK.md](BUILD-APK.md).
+
+### Shipping checklist
+
+1. **Backend → Render:** push the repo → Render → New → Blueprint → Apply
+   (`render.yaml`: Starter + disk recommended, free tier works with
+   caveats). Add `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` for the midnight
+   digest. Note the URL, e.g. `https://ghost-chat.onrender.com`.
+2. **Firebase:** fill `public/firebase-config.js` with your production
+   project (README → Auth), add **both** the Pages domain and (optionally)
+   the Render domain to Authorized domains, set `emulator: false`.
+3. **Frontend → GitHub Pages:** repo variable `BACKEND_URL` = your Render
+   URL → Settings → Pages → Source: GitHub Actions → push to `main`
+   (`pages.yml` deploys).
+4. **APK:** Actions → Build Android APK → download artifact → sideload.
+   Details + stable signing + fullscreen setup: [BUILD-APK.md](BUILD-APK.md).
+
+Other supported targets:
+
 - **Anywhere with Node ≥ 20** — including **Termux on Android**
   (`pkg install nodejs` → `node server.js`). See
   [DEPLOY-TERMUX.md](DEPLOY-TERMUX.md).

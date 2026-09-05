@@ -81,6 +81,73 @@ async function copyText(text) {
   }
 }
 
+/* ------------------------------ notifications ------------------------------ */
+
+let notifEnabled = ls.get('ghost.notif') === '1';
+
+function notifSupported() {
+  return typeof window !== 'undefined' && 'Notification' in window;
+}
+
+async function toggleNotifications() {
+  if (!notifSupported()) { toast('Notifications are not supported here.'); return; }
+  if (notifEnabled) {
+    notifEnabled = false;
+    ls.set('ghost.notif', '0');
+    updateNotifBtn();
+    toast('🔕 Notifications muted');
+    return;
+  }
+  try {
+    const p = await Notification.requestPermission();
+    if (p === 'granted') {
+      notifEnabled = true;
+      ls.set('ghost.notif', '1');
+      toast('🔔 Notifications on');
+    } else {
+      toast('Notification permission denied by the browser.');
+    }
+  } catch { toast('Could not request notification permission.'); }
+  updateNotifBtn();
+}
+
+function updateNotifBtn() {
+  const btn = document.getElementById('notif-btn');
+  if (!btn) return;
+  btn.textContent = notifEnabled ? '🔔' : '🔕';
+  btn.title = notifEnabled ? 'Notifications on — click to mute' : 'Notifications off — click to enable';
+}
+
+function notifyMessage(m) {
+  if (!notifEnabled || !notifSupported() || Notification.permission !== 'granted') return;
+  if (m.system) return;
+  if (m.username === S.me.username) return;
+  // quiet when you're looking at the conversation that got the message
+  if (!document.hidden && m.channel === S.active) return;
+  const conv = getConv(m.channel);
+  const where = conv
+    ? (conv.type === 'dm' ? `@${dmPartner(conv)}` : `${conv.private ? '🔒 ' : '#'}${conv.name}`)
+    : 'Ghost Chat';
+  const title = `${where} — @${m.username}`;
+  const body = m.text.length > 110 ? m.text.slice(0, 110) + '…' : m.text;
+  const opts = {
+    body,
+    icon: 'icons/icon-192.png',
+    badge: 'icons/icon-192.png',
+    tag: 'gc-' + m.channel, // one notification per conversation, newest wins
+    data: { convId: m.channel },
+  };
+  try {
+    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.ready
+        .then((reg) => reg.showNotification(title, opts))
+        .catch(() => new Notification(title, opts));
+    } else {
+      new Notification(title, opts);
+    }
+  } catch {}
+}
+
 /* ------------------------------ firebase ------------------------------ */
 
 // On sandbox preview hosts (PORT-sandboxid.domain) point at the emulator's
@@ -248,6 +315,7 @@ function onMessage(m) {
     scrollBottom(m.username === S.me.username);
     renderTyping();
   }
+  notifyMessage(m);
   renderSidebar();
 }
 
@@ -828,6 +896,10 @@ function renderMe() {
   const status = document.createElement('div');
   status.className = 'me-status offline'; status.id = 'me-status'; status.textContent = 'connecting…';
   info.append(name, status);
+  const notif = document.createElement('button');
+  notif.className = 'icon-btn';
+  notif.id = 'notif-btn';
+  notif.onclick = toggleNotifications;
   const out = document.createElement('button');
   out.className = 'icon-btn';
   out.title = 'Sign out';
@@ -838,7 +910,8 @@ function renderMe() {
     try { Object.keys(localStorage).filter((k) => k.startsWith('ghost.')).forEach((k) => localStorage.removeItem(k)); } catch {}
     location.reload();
   };
-  card.append(av, info, out);
+  card.append(av, info, notif, out);
+  updateNotifBtn();
 }
 
 /* ------------------------------ firebase UI ------------------------------ */
@@ -910,6 +983,14 @@ function guestId() {
 /* ------------------------------ boot ------------------------------ */
 
 async function boot() {
+  /* service worker: app-shell cache + notification plumbing (PWA/TWA) */
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed:', e));
+  }
+  if (notifSupported() && Notification.permission !== 'granted') {
+    notifEnabled = false; // stale pref without permission
+  }
+
   /* shared wiring */
   $('#send-btn').onclick = sendMessage;
   $('#emoji-btn').onclick = (e) => openPicker(e.currentTarget, { mode: 'composer' });
