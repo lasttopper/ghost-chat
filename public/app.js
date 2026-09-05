@@ -34,6 +34,7 @@ const S = {
   report: null,                // { convId, messageId, targetUser, preview }
   fb: null,                    // firebase auth bundle or null (guest mode)
   seenMsg: new Set(),          // message ids already rendered (entrance animation)
+  showOffline: false,          // People list: offline members collapsed by default
 };
 
 let lastRead = {};
@@ -432,15 +433,16 @@ function renderSidebar() {
     list.appendChild(btn);
   }
 
-  /* People */
+  /* People — online first; offline collapsed behind a toggle */
   const team = $('#team-list');
   team.innerHTML = '';
-  const names = Object.keys(S.users).filter((u) => u !== 'GhostBot').sort((a, b) => {
-    const ao = S.online.has(a) ? 0 : 1, bo = S.online.has(b) ? 0 : 1;
-    return ao - bo || a.localeCompare(b);
-  });
-  for (const name of names) {
-    const on = S.online.has(name);
+  const allNames = Object.keys(S.users).filter((u) => u !== 'GhostBot');
+  const peopleOnline = $('#people-online');
+  if (peopleOnline) peopleOnline.textContent = `${S.online.size} online`;
+  const onlineNamesList = allNames.filter((n) => S.online.has(n)).sort((a, b) => a.localeCompare(b));
+  const offlineNamesList = allNames.filter((n) => !S.online.has(n)).sort((a, b) => a.localeCompare(b));
+
+  const makeRow = (name, on) => {
     const row = document.createElement('div');
     row.className = 'team-item' + (on ? '' : ' offline-name');
     const dot = document.createElement('span'); dot.className = 'dot' + (on ? '' : ' offline');
@@ -450,7 +452,22 @@ function renderSidebar() {
       const you = document.createElement('span'); you.className = 'you'; you.textContent = '(you)';
       row.appendChild(you);
     }
-    team.appendChild(row);
+    return row;
+  };
+
+  for (const name of onlineNamesList) team.appendChild(makeRow(name, true));
+
+  if (offlineNamesList.length) {
+    const tgl = document.createElement('button');
+    tgl.className = 'offline-toggle';
+    tgl.textContent = S.showOffline
+      ? `▾ Hide ${offlineNamesList.length} offline`
+      : `▸ Show ${offlineNamesList.length} offline`;
+    tgl.onclick = () => { S.showOffline = !S.showOffline; renderSidebar(); };
+    team.appendChild(tgl);
+    if (S.showOffline) {
+      for (const name of offlineNamesList) team.appendChild(makeRow(name, false));
+    }
   }
 }
 
@@ -786,35 +803,49 @@ function createChannel() {
 
 function openDmModal() {
   const list = $('#dm-user-list');
-  list.innerHTML = '';
-  const names = Object.keys(S.users).filter((u) => u !== S.me.username && u !== 'GhostBot').sort();
-  if (!names.length) {
-    const p = document.createElement('p');
-    p.className = 'muted';
-    p.textContent = 'No other users yet.';
-    list.appendChild(p);
-  }
-  for (const name of names) {
-    const btn = document.createElement('button');
-    btn.className = 'dm-user';
-    const av = document.createElement('span');
-    av.className = 'dm-avatar';
-    av.style.background = userColor(name);
-    av.textContent = initials(name);
-    const label = document.createElement('span');
-    label.textContent = '@' + name;
-    const dot = document.createElement('span');
-    dot.className = 'dot status-dot' + (S.online.has(name) ? '' : ' offline');
-    btn.append(av, label, dot);
-    btn.onclick = () => {
-      $('#dm-modal-backdrop').classList.add('hidden');
-      const existing = S.dms.find((d) => d.members.includes(name));
-      if (existing) switchConv(existing.id);
-      else send({ type: 'dm_start', to: name });
-    };
-    list.appendChild(btn);
-  }
+  const search = $('#dm-search');
+
+  const draw = () => {
+    const q = search.value.trim().toLowerCase().replace(/^@/, '');
+    list.innerHTML = '';
+    const names = Object.keys(S.users)
+      .filter((u) => u !== S.me.username && u !== 'GhostBot')
+      .filter((u) => !q || u.includes(q))
+      .sort((a, b) => (S.online.has(b) - S.online.has(a)) || a.localeCompare(b)); // online first
+    if (!names.length) {
+      const p = document.createElement('p');
+      p.className = 'muted';
+      p.textContent = q ? `No users matching "@${q}".` : 'No other users yet.';
+      list.appendChild(p);
+      return;
+    }
+    for (const name of names) {
+      const btn = document.createElement('button');
+      btn.className = 'dm-user';
+      const av = document.createElement('span');
+      av.className = 'dm-avatar';
+      av.style.background = userColor(name);
+      av.textContent = initials(name);
+      const label = document.createElement('span');
+      label.textContent = '@' + name;
+      const dot = document.createElement('span');
+      dot.className = 'dot status-dot' + (S.online.has(name) ? '' : ' offline');
+      btn.append(av, label, dot);
+      btn.onclick = () => {
+        $('#dm-modal-backdrop').classList.add('hidden');
+        const existing = S.dms.find((d) => d.members.includes(name));
+        if (existing) switchConv(existing.id);
+        else send({ type: 'dm_start', to: name });
+      };
+      list.appendChild(btn);
+    }
+  };
+
+  search.value = '';
+  search.oninput = draw;
+  draw();
   $('#dm-modal-backdrop').classList.remove('hidden');
+  search.focus();
 }
 
 /* ------------------------------ auth screens ------------------------------ */
@@ -1189,10 +1220,23 @@ async function boot() {
 
   /* Show the login screen IMMEDIATELY (guest mode) — never block first paint
    * on a CDN import. When the Firebase SDK arrives, the sign-in form appears;
-   * if it never arrives (blocked/slow network), guest mode keeps working. */
-  showLogin();
+   * if it never arrives (blocked/slow network), guest mode keeps working.
+   * Returning guests skip the login screen entirely — invite links then drop
+   * them straight into the group. */
+  const savedGuestId = ls.get('ghost.guestId');
+  const savedGuestName = savedGuestId && ls.get('ghost.usernameFor.' + savedGuestId);
+  if (parseJoinCode()) $('#invite-banner').classList.remove('hidden');
+  if (savedGuestName) {
+    S.me = {
+      authId: savedGuestId, email: '', displayName: '', mode: 'guest', username: null,
+      color: ls.get('ghost.colorFor.' + savedGuestId) || pickedColor,
+    };
+    afterAuth();
+  } else {
+    showLogin();
+  }
   loadFirebase().then((fb) => {
-    if (!fb) return;
+    if (!fb || S.me) return;
     S.fb = fb;
     wireFirebaseUi();
     const fbSection = $('#auth-firebase');

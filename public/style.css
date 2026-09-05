@@ -608,6 +608,56 @@ body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
 .guest-btn:hover { border-color: var(--accent); }
 .guest-btn:active { transform: scale(.98); }
 
+/* invite banner on login screen */
+.invite-banner {
+  background: rgba(99, 102, 241, .12);
+  border: 1px solid rgba(99, 102, 241, .45);
+  color: #c7d2fe;
+  border-radius: 10px;
+  padding: 11px 13px;
+  font-size: 13px;
+  margin-bottom: 16px;
+  text-align: left;
+  line-height: 1.45;
+  animation: fade-up .3s ease both;
+}
+.invite-banner b { color: #e0e7ff; }
+
+/* DM people search */
+.dm-search {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 10px 13px;
+  font-size: 16px;
+  outline: none;
+  margin-bottom: 10px;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.dm-search:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99, 102, 241, .25); }
+
+/* People list: online count + offline toggle */
+.people-online {
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.offline-toggle {
+  background: none; border: none;
+  color: var(--faint);
+  font-size: 12.5px;
+  padding: 7px 8px;
+  width: 100%;
+  text-align: left;
+  border-radius: 8px;
+  transition: color var(--t-fast), background var(--t-fast);
+}
+.offline-toggle:hover { color: var(--muted); background: var(--panel-2); }
+
 /* Android app download (hidden when already running as an installed app) */
 .apk-btn {
   display: flex; align-items: center; justify-content: center; gap: 8px;

@@ -20,6 +20,10 @@
       <h1>Ghost Chat</h1>
       <p class="muted">Public groups, private groups, DMs — in real time.</p>
 
+      <div id="invite-banner" class="invite-banner hidden">
+        🔗 <b>You've been invited to a group.</b> Sign in (or continue as guest) and you'll join it automatically.
+      </div>
+
       <div id="auth-firebase" class="auth-firebase hidden">
         <div class="auth-tabs">
           <button id="tab-signin" class="auth-tab active">Sign in</button>
@@ -88,7 +92,7 @@
         </div>
         <div id="channel-list" class="side-list"></div>
 
-        <div class="side-title team-title"><span>People</span></div>
+        <div class="side-title team-title"><span>People</span><span id="people-online" class="people-online"></span></div>
         <div id="team-list" class="side-list"></div>
       </div>
 
@@ -161,6 +165,7 @@
     <div class="modal">
       <h3>New direct message</h3>
       <p class="muted">Pick someone to start a private 1-on-1 chat.</p>
+      <input id="dm-search" class="dm-search" type="search" placeholder="Search people by @username…" autocomplete="off" spellcheck="false">
       <div id="dm-user-list" class="dm-user-list"></div>
       <div class="modal-actions">
         <button id="dm-modal-cancel">Cancel</button>

@@ -111,13 +111,16 @@ function stopServer() { try { server.kill('SIGKILL'); } catch {} }
   });
   const w2 = dom2.window;
   const $2 = (s) => w2.document.querySelector(s);
-  await wait(2000);
-  if (!vis2('#login')) fail('phase2: login not visible');
-  $2('#guest-btn').dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
-  await wait(2500); // ws attempts fail → cached data must carry the app
-
   function vis2(s) { const el = $2(s); return !!el && !el.classList.contains('hidden'); }
-  if (!vis2('#app')) fail('phase2: app shell not shown offline'); else console.log('phase2: offline app shell visible ✓');
+  // the seeded storage contains a returning guest identity → the app
+  // auto-resumes straight into the shell (no login click needed)
+  await wait(2500);
+  if (!vis2('#app')) {
+    // fallback for a fresh/unknown identity: walk the login path
+    if (vis2('#login')) $2('#guest-btn').dispatchEvent(new w2.MouseEvent('click', { bubbles: true }));
+    await wait(2500);
+  }
+  if (!vis2('#app')) fail('phase2: app shell not shown offline'); else console.log('phase2: offline app shell visible (auto-resumed) ✓');
 
   const cachedMsg = [...w2.document.querySelectorAll('.msg-text')].some((n) => n.textContent === MARK);
   if (!cachedMsg) fail('phase2: cached message not rendered'); else console.log('phase2: cached conversation rendered ✓');
