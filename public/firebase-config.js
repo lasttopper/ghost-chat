@@ -1,19 +1,27 @@
 /* Ghost Chat — Firebase configuration.
  *
- * Fill these in with your Firebase project's web app config
- * (Firebase Console → Project settings → General → Your apps → Web app)
- * and enable Email/Password + Google sign-in under Authentication →
- * Sign-in method. Then add your hosting domain(s) to Authentication →
- * Settings → Authorized domains.
+ * DEVELOPMENT (default, works out of the box):
+ *   Runs against the local Firebase Auth EMULATOR — start it with:
+ *     npm run emulators
+ *   Accounts created there are temporary (cleared on emulator restart).
  *
- * Until you do, Ghost Chat runs in Guest mode (per-browser identity,
- * no password) so local development keeps working.
+ * PRODUCTION:
+ *   1. npm i -g firebase-tools && firebase login
+ *   2. firebase projects:create <your-project>  (or use an existing one)
+ *   3. firebase apps:create web "Ghost Chat"     → note the appId
+ *   4. firebase apps:sdkconfig web <appId>       → copy the values below
+ *   5. Enable Email/Password + Google under Authentication → Sign-in method
+ *   6. Add your hosting domain under Authentication → Settings →
+ *      Authorized domains
+ *   7. Set `emulator: false` (or remove the line).
  */
 window.FIREBASE_CONFIG = {
-  apiKey: 'YOUR_API_KEY',
-  authDomain: 'YOUR_PROJECT.firebaseapp.com',
-  projectId: 'YOUR_PROJECT',
-  storageBucket: 'YOUR_PROJECT.appspot.com',
-  messagingSenderId: 'YOUR_SENDER_ID',
-  appId: 'YOUR_APP_ID',
+  apiKey: 'demo-emulator-key',
+  authDomain: 'localhost',
+  projectId: 'demo-ghost-chat',
+
+  // true | false | 'auto'
+  // 'auto' = use the emulator only on localhost / sandbox preview hosts,
+  // so production deploys never talk to an emulator by accident.
+  emulator: 'auto',
 };

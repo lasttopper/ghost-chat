@@ -14,23 +14,49 @@ node server.js          # http://localhost:3000
 Open it in two browser tabs, join with two different usernames, and watch
 everything sync live.
 
-## Auth
+## Auth (Firebase CLI)
 
-Ghost Chat uses **Firebase Authentication** (email/password + Google) when
-configured, and falls back to **Guest mode** (per-browser identity) so local
-development works with zero setup.
+### Development — Auth emulator (default, zero setup)
 
-1. Create a Firebase project → Authentication → enable **Email/Password** and **Google**.
-2. Register a Web App and copy its config into `public/firebase-config.js`.
-3. Add your hosting domain(s) under Authentication → Settings → Authorized domains.
+The repo ships configured for the **Firebase Auth emulator** via the Firebase
+CLI (demo project `demo-ghost-chat`, no Google account or login needed):
+
+```bash
+npm install
+npm run emulators     # Firebase CLI: Auth emulator on :9099
+node server.js        # Ghost Chat on :3000
+```
+
+Open the app → **Create account** with any email/password → pick a
+`@username`. Emulator accounts are temporary (cleared on restart). In
+emulator mode the Google button is disabled (OAuth popups need a real
+project). `firebase.json` + `.firebaserc` hold the emulator config.
+
+### Production — real Firebase project
+
+```bash
+npm i -g firebase-tools
+firebase login
+firebase projects:create <your-project>        # or reuse an existing one
+firebase apps:create web "Ghost Chat"          # note the appId
+firebase apps:sdkconfig web <appId>            # copy values into
+                                               # public/firebase-config.js
+```
+
+Then: enable **Email/Password** + **Google** (Authentication → Sign-in
+method), add your hosting domain to **Authorized domains**, and set
+`emulator: false` in `public/firebase-config.js`.
+
+`emulator: 'auto'` (the default) only uses the emulator on
+localhost/preview hosts — production deploys never talk to an emulator by
+accident.
 
 After signing in, each user picks a unique `@username` (3–20 chars,
-`[a-z0-9_]`). The server ties usernames to Firebase UIDs, so a username
-belongs to one account.
+`[a-z0-9_]`), bound server-side to their Firebase UID (verified by
+`npm test` → firebase e2e).
 
-> Note: the server currently trusts the identity the client sends. For
-> production, verify the Firebase ID token server-side (firebase-admin) —
-> see the note in `core.js`.
+> Note: the chat server currently trusts the identity the client sends. For
+> production, verify the Firebase ID token server-side (firebase-admin).
 
 ## Groups & DMs
 
@@ -68,7 +94,8 @@ admin-only chat.
 ## Test
 
 ```bash
-npm test    # standalone + Vercel handler + digest e2e (90 assertions)
+npm run emulators &    # optional: enables the firebase e2e (skips without it)
+npm test               # standalone + vercel + digest + firebase = 98 assertions
 ```
 
 ## Deploy

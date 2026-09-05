@@ -83,16 +83,41 @@ async function copyText(text) {
 
 /* ------------------------------ firebase ------------------------------ */
 
+// On sandbox preview hosts (PORT-sandboxid.domain) point at the emulator's
+// own proxied port; locally use the standard emulator address.
+function emulatorUrlFor() {
+  const m = location.hostname.match(/^(\d+)-(.+)$/);
+  if (m && !/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    return `${location.protocol}//9099-${m[2]}`;
+  }
+  return 'http://127.0.0.1:9099';
+}
+
 async function loadFirebase() {
   const cfg = window.FIREBASE_CONFIG;
-  if (!cfg || !cfg.apiKey || /YOUR_/.test(cfg.apiKey)) return null;
+  if (!cfg) return null;
+  const hasRealKeys = cfg.apiKey && !/YOUR_/.test(cfg.apiKey) && !/^demo-/.test(cfg.apiKey);
+  const hostIsLocalish = /^(localhost|127\.0\.0\.1)$/.test(location.hostname) || /\.e2b\.app$/.test(location.hostname);
+  const useEmulator = cfg.emulator === true || (cfg.emulator === 'auto' && hostIsLocalish);
+  if (!hasRealKeys && !useEmulator) return null; // guest mode
   try {
     const [appMod, authMod] = await Promise.all([
       import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js'),
       import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'),
     ]);
-    const app = appMod.initializeApp(cfg);
-    return { auth: authMod.getAuth(app), authMod };
+    const app = appMod.initializeApp({
+      apiKey: cfg.apiKey || 'demo-emulator-key',
+      authDomain: cfg.authDomain || 'localhost',
+      projectId: cfg.projectId || 'demo-ghost-chat',
+      storageBucket: cfg.storageBucket,
+      messagingSenderId: cfg.messagingSenderId,
+      appId: cfg.appId,
+    });
+    const auth = authMod.getAuth(app);
+    if (useEmulator) {
+      authMod.connectAuthEmulator(auth, emulatorUrlFor(), { disableWarnings: true });
+    }
+    return { auth, authMod, emulator: useEmulator };
   } catch (e) {
     console.warn('Firebase unavailable, guest mode only:', e);
     return null;
@@ -716,9 +741,21 @@ function showLogin() {
   const guestNote = $('#auth-guest-note');
   if (S.fb) {
     fbSection.classList.remove('hidden');
-    guestNote.classList.add('hidden');
+    if (S.fb.emulator) {
+      guestNote.innerHTML = '';
+      guestNote.append(document.createTextNode('🧪 Connected to the local Firebase Auth emulator (demo-ghost-chat). Accounts are temporary.'));
+      guestNote.classList.remove('hidden');
+    } else {
+      guestNote.classList.add('hidden');
+    }
   } else {
     fbSection.classList.add('hidden');
+    guestNote.textContent = '';
+    guestNote.append(
+      document.createTextNode("Firebase isn't configured yet (see "),
+      Object.assign(document.createElement('code'), { textContent: 'public/firebase-config.js' }),
+      document.createTextNode('), so Ghost Chat is running in Guest mode — identities are per-browser.')
+    );
     guestNote.classList.remove('hidden');
   }
 }
@@ -842,6 +879,12 @@ function wireFirebaseUi() {
   $('#auth-password').onkeydown = (e) => { if (e.key === 'Enter') submit.onclick(); };
 
   $('#auth-google').onclick = async () => {
+    if (S.fb.emulator) {
+      const el = $('#auth-error');
+      el.textContent = 'Google sign-in is not available in emulator mode — use email/password.';
+      el.classList.remove('hidden');
+      return;
+    }
     try {
       const provider = new S.fb.authMod.GoogleAuthProvider();
       const cred = await S.fb.authMod.signInWithPopup(S.fb.auth, provider);

@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node test/e2e.js && node test/vercel-e2e.js && node test/digest-e2e.js",
-    "start": "node server.js"
+    "test": "node test/e2e.js && node test/vercel-e2e.js && node test/digest-e2e.js && node test/firebase-e2e.js",
+    "start": "node server.js",
+    "emulators": "firebase emulators:start --only auth --project demo-ghost-chat"
   },
   "keywords": [],
   "author": "",
@@ -15,5 +16,9 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "devDependencies": {
+    "firebase": "^12.18.0",
+    "firebase-tools": "^15.29.0"
   }
 }
