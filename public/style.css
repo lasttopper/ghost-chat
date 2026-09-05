@@ -608,6 +608,20 @@ body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
 .guest-btn:hover { border-color: var(--accent); }
 .guest-btn:active { transform: scale(.98); }
 
+/* Android app download (hidden when already running as an installed app) */
+.apk-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  width: 100%; margin-top: 10px;
+  padding: 11px; min-height: 42px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: none; color: var(--muted);
+  font-size: 13.5px; font-weight: 600; text-decoration: none;
+  transition: color var(--t-fast), border-color var(--t-fast), transform var(--t-fast);
+}
+.apk-btn:hover { color: var(--text); border-color: var(--green); }
+.apk-btn:active { transform: scale(.98); }
+@media (display-mode: standalone) { .apk-btn { display: none; } }
+
 /* username setup */
 .username-identity {
   font-size: 13px; color: var(--muted);

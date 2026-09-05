@@ -28,6 +28,8 @@ jobs:
   build-apk:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write   # publish the APK to a GitHub Release
     steps:
       - uses: actions/checkout@v4
 
@@ -106,3 +108,20 @@ jobs:
             twa/app-release-signed.apk
             twa/app-release-bundle.aab
           if-no-files-found: error
+
+      - name: Publish APK to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          cd twa
+          # stable asset names — the web download button points at
+          # /releases/latest/download/ghost-chat.apk
+          cp app-release-signed.apk ghost-chat.apk
+          cp app-release-bundle.aab ghost-chat.aab
+          TAG="${GITHUB_REF_NAME}"
+          case "$TAG" in v*) ;; *) TAG="v1.0.0" ;; esac
+          gh release create "$TAG" \
+            --title "Ghost Chat $TAG" \
+            --notes "Ghost Chat for Android (TWA). Invite links on ghost-chat-5gxc.onrender.com deep-link into the app; when it isn't installed they fall back to the web app." \
+            --target "$GITHUB_SHA" --latest || true
+          gh release upload "$TAG" ghost-chat.apk ghost-chat.aab --clobber --latest
