@@ -100,12 +100,16 @@ npm test               # standalone + vercel + digest + firebase = 98 assertions
 
 ## Deploy
 
-- **Standalone / VM / Fly / Railway:** `node server.js` — works as-is.
+- **Anywhere with Node ≥ 20** — including **Termux on Android**
+  (`pkg install nodejs` → `node server.js`). See
+  [DEPLOY-TERMUX.md](DEPLOY-TERMUX.md).
 - **Render:** one-click blueprint (`render.yaml`) with optional persistent
   disk. See [DEPLOY-RENDER.md](DEPLOY-RENDER.md).
+- **Railway:** persistent service, `railway.json` included, volume for
+  persistence. See [DEPLOY-RAILWAY.md](DEPLOY-RAILWAY.md).
 - **Vercel:** WebSocket beta + Fluid compute; entry point `api/ws.js`,
   optional Upstash Redis. Note: the midnight digest scheduler runs on the
-  standalone/Render server, not the Vercel function. See
+  standalone/Render/Railway server, not the Vercel function. See
   [DEPLOY-VERCEL.md](DEPLOY-VERCEL.md).
 - **DNSExit:** KVM VPS only (shared hosting won't run Node). See
   [DEPLOY-DNSEXIT.md](DEPLOY-DNSEXIT.md).
