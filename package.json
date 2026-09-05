@@ -19,6 +19,7 @@
   },
   "devDependencies": {
     "firebase": "^12.18.0",
-    "firebase-tools": "^15.29.0"
+    "firebase-tools": "^15.29.0",
+    "jsdom": "^29.1.1"
   }
 }

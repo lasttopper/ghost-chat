@@ -168,9 +168,12 @@ async function loadFirebase() {
   const useEmulator = cfg.emulator === true || (cfg.emulator === 'auto' && hostIsLocalish);
   if (!hasRealKeys && !useEmulator) return null; // guest mode
   try {
-    const [appMod, authMod] = await Promise.all([
-      import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js'),
-      import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'),
+    const [appMod, authMod] = await Promise.race([
+      Promise.all([
+        import('https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js'),
+        import('https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js'),
+      ]),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('firebase SDK load timeout')), 10000)),
     ]);
     const app = appMod.initializeApp({
       apiKey: cfg.apiKey || 'demo-emulator-key',
@@ -1037,18 +1040,29 @@ async function boot() {
   $('#username-submit').onclick = submitUsername;
   $('#username-input').onkeydown = (e) => { if (e.key === 'Enter') submitUsername(); };
 
-  /* identity: firebase if configured, else guest */
-  S.fb = await loadFirebase();
-  if (S.fb) wireFirebaseUi();
-
   $('#guest-btn').onclick = () => {
     S.me = { authId: guestId(), email: '', displayName: '', mode: 'guest', username: null, color: pickedColor };
     afterAuth();
   };
 
-  /* returning user with an active firebase session? skip login */
-  if (S.fb) {
-    const cur = S.fb.authMod.currentUser(S.fb.auth);
+  /* Show the login screen IMMEDIATELY (guest mode) — never block first paint
+   * on a CDN import. When the Firebase SDK arrives, the sign-in form appears;
+   * if it never arrives (blocked/slow network), guest mode keeps working. */
+  showLogin();
+  loadFirebase().then((fb) => {
+    if (!fb) return;
+    S.fb = fb;
+    wireFirebaseUi();
+    const fbSection = $('#auth-firebase');
+    const guestNote = $('#auth-guest-note');
+    fbSection.classList.remove('hidden');
+    if (fb.emulator) {
+      guestNote.innerHTML = '';
+      guestNote.append(document.createTextNode('🧪 Connected to the local Firebase Auth emulator (demo-ghost-chat). Accounts are temporary.'));
+    } else {
+      guestNote.classList.add('hidden');
+    }
+    const cur = fb.authMod.currentUser(fb.auth);
     if (cur) {
       S.me = {
         authId: cur.uid, email: cur.email || '', displayName: cur.displayName || '',
@@ -1057,10 +1071,8 @@ async function boot() {
       pickedColor = ls.get('ghost.colorFor.' + S.me.authId) || pickedColor;
       renderSwatches($('#login-colors'), pickedColor, (c) => { pickedColor = c; });
       afterAuth();
-      return;
     }
-  }
-  showLogin();
+  }).catch(() => {});
 }
 
 document.addEventListener('DOMContentLoaded', boot);
