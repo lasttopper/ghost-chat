@@ -238,9 +238,17 @@ function createCore(persistence) {
     switch (msg.type) {
       case 'join': {
         const color = sanitizeColor(msg.color);
-        const rawName = String(msg.username || '').toLowerCase().trim();
+        let rawName = String(msg.username || '').toLowerCase().trim();
+        // Returning user without a locally-remembered name: resolve the
+        // username attached to this auth identity (Firebase uid / guest id),
+        // so logout → login never asks for the username again.
+        if (!rawName && msg.authId) {
+          const authId = String(msg.authId);
+          const known = Object.keys(state.users).find((u) => state.users[u].authId === authId);
+          if (known) rawName = known;
+        }
         if (!rawName) { send(ws, { type: 'need_username' }); return; }
-        const ok = admitUsername(ws, msg);
+        const ok = admitUsername(ws, { ...msg, username: rawName });
         if (!ok) return;
         await ready;
         if (saveTimer) await saveNow(); // flush pending writes before clobbering state via reload

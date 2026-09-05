@@ -88,7 +88,11 @@ async function copyText(text) {
 let notifEnabled = ls.get('ghost.notif') === '1';
 
 function notifSupported() {
-  return typeof window !== 'undefined' && 'Notification' in window;
+  if (typeof window === 'undefined') return false;
+  if ('Notification' in window) return true;
+  // Android has no Notification constructor but SW notifications work fine
+  const SWR = window.ServiceWorkerRegistration;
+  return !!(navigator.serviceWorker && SWR && SWR.prototype && 'showNotification' in SWR.prototype);
 }
 
 async function toggleNotifications() {
@@ -98,6 +102,15 @@ async function toggleNotifications() {
     ls.set('ghost.notif', '0');
     updateNotifBtn();
     toast('🔕 Notifications muted');
+    return;
+  }
+  if (typeof Notification === 'undefined') {
+    // Android/TWA: no Notification constructor, but SW notifications are
+    // delegated to the OS by the launcher — no JS permission prompt needed.
+    notifEnabled = true;
+    ls.set('ghost.notif', '1');
+    updateNotifBtn();
+    toast('🔔 Notifications on');
     return;
   }
   try {
@@ -121,7 +134,11 @@ function updateNotifBtn() {
 }
 
 function notifyMessage(m) {
-  if (!notifEnabled || !notifSupported() || Notification.permission !== 'granted') return;
+  if (!notifEnabled || !notifSupported()) return;
+  // Desktop (Notification constructor present) needs explicit permission.
+  // Android/TWA has no constructor and relies on SW notifications delegated
+  // to the OS, so only block when the constructor exists AND isn't granted.
+  if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') return;
   if (m.system) return;
   if (m.username === S.me.username) return;
   // quiet when you're looking at the conversation that got the message
@@ -140,10 +157,13 @@ function notifyMessage(m) {
     data: { convId: m.channel },
   };
   try {
-    if (navigator.serviceWorker && navigator.serviceWorker.controller) {
+    // Android (incl. the TWA) has no Notification constructor — always go
+    // through the service worker when one exists; desktop falls back to the
+    // constructor. `ready` resolves even before the SW controls this page.
+    if (navigator.serviceWorker) {
       navigator.serviceWorker.ready
         .then((reg) => reg.showNotification(title, opts))
-        .catch(() => new Notification(title, opts));
+        .catch(() => { try { new Notification(title, opts); } catch {} });
     } else {
       new Notification(title, opts);
     }
@@ -209,6 +229,8 @@ function wsUrl() {
 }
 
 function connect() {
+  // retire any previous socket without letting its onclose spawn a duplicate
+  if (S.ws) { try { S.ws.onclose = null; S.ws.onmessage = null; S.ws.close(); } catch {} }
   S.ws = new WebSocket(wsUrl());
   S.ws.onopen = () => {
     S.reconnectDelay = 1000;
@@ -249,6 +271,14 @@ function route(msg) {
       S.online = new Set(msg.online || []);
       S.serverNow = msg.now;
       S.me.username = msg.username;
+      // remember the account-bound name + color locally (fast next boot)
+      ls.set('ghost.usernameFor.' + S.me.authId, msg.username);
+      const meRec = S.users[msg.username];
+      if (meRec && meRec.color) {
+        S.me.color = meRec.color;
+        ls.set('ghost.colorFor.' + S.me.authId, meRec.color);
+      }
+      renderMe();
       for (const conv of [...S.channels, ...S.dms]) {
         if (!(conv.id in lastRead)) lastRead[conv.id] = S.serverNow;
         if (!S.typing[conv.id]) S.typing[conv.id] = new Map();
@@ -923,7 +953,11 @@ function afterAuth() {
     S.me.color = ls.get('ghost.colorFor.' + S.me.authId) || pickedColor;
     enterApp();
   } else {
-    showUsernameSetup('');
+    // No local memory of the name (fresh device or after logout): let the
+    // server resolve the username bound to this authId. If it has never
+    // seen this identity it answers 'need_username' and we show the setup.
+    S.me.username = null;
+    enterApp();
   }
 }
 
@@ -934,6 +968,15 @@ function submitUsername() {
   S.me.color = pickedColor;
   ls.set('ghost.usernameFor.' + S.me.authId, name);
   ls.set('ghost.colorFor.' + S.me.authId, pickedColor);
+  // also stamp the chosen name onto the Firebase account (displayName), so it
+  // survives across devices even if the server's memory was wiped. Best
+  // effort — authId binding on the server is the primary mechanism.
+  if (S.fb && S.fb.authMod) {
+    try {
+      const cur = S.fb.authMod.currentUser(S.fb.auth);
+      if (cur) S.fb.authMod.updateProfile(cur, { displayName: name }).catch(() => {});
+    } catch {}
+  }
   enterApp();
 }
 
@@ -996,21 +1039,50 @@ function enterApp() {
   }
   loadOfflineCache(); // show saved conversations until the socket delivers live data
   connect();
+  maybeAskNotifPermission();
+}
+
+/* Ask for notification permission once, right after entering the app (the
+ * click that got us here counts as the user gesture browsers require).
+ * Without this, notifications stay dead until someone finds the 🔔 button. */
+function maybeAskNotifPermission() {
+  if (!notifSupported() || typeof Notification === 'undefined') return;
+  if (Notification.permission !== 'default') {
+    // previously decided — respect it (boot() already synced notifEnabled)
+    if (Notification.permission === 'granted' && ls.get('ghost.notif') !== '0') {
+      notifEnabled = true;
+      updateNotifBtn();
+    }
+    return;
+  }
+  if (ls.get('ghost.notifAsked') === '1') return;
+  ls.set('ghost.notifAsked', '1');
+  try {
+    Notification.requestPermission().then((p) => {
+      if (p === 'granted') {
+        notifEnabled = true;
+        ls.set('ghost.notif', '1');
+        updateNotifBtn();
+        toast('🔔 Notifications enabled');
+      }
+    }).catch(() => {});
+  } catch {}
 }
 
 function renderMe() {
+  if (!S.me) return;
   const card = $('#me-card');
   card.innerHTML = '';
   const av = document.createElement('div');
   av.className = 'avatar';
   av.style.background = S.me.color;
   av.style.width = '32px'; av.style.height = '32px'; av.style.fontSize = '13px'; av.style.marginTop = '0';
-  av.textContent = initials(S.me.username);
+  av.textContent = S.me.username ? initials(S.me.username) : '…';
   const info = document.createElement('div');
   info.className = 'me-info';
   const name = document.createElement('div');
   name.className = 'me-name';
-  name.textContent = '@' + S.me.username + (S.me.mode === 'guest' ? ' (guest)' : '');
+  name.textContent = (S.me.username ? '@' + S.me.username : '…') + (S.me.mode === 'guest' ? ' (guest)' : '');
   const status = document.createElement('div');
   status.className = 'me-status offline'; status.id = 'me-status'; status.textContent = 'connecting…';
   info.append(name, status);
@@ -1024,8 +1096,15 @@ function renderMe() {
   out.textContent = '⏻';
   out.onclick = async () => {
     if (S.fb) { try { await S.fb.authMod.signOut(S.fb.auth); } catch {} }
-    for (const k of Object.keys(mem)) ls.del(k);
-    try { Object.keys(localStorage).filter((k) => k.startsWith('ghost.')).forEach((k) => localStorage.removeItem(k)); } catch {}
+    // keep the per-browser guest identity + colors so the name can be
+    // recovered (server resolves the username from the authId); drop the rest
+    const keep = /^ghost\.(guestId|colorFor\.)/;
+    try {
+      Object.keys(localStorage)
+        .filter((k) => k.startsWith('ghost.') && !keep.test(k))
+        .forEach((k) => localStorage.removeItem(k));
+    } catch {}
+    try { Object.keys(mem).filter((k) => !keep.test(k)).forEach((k) => { delete mem[k]; }); } catch {}
     location.reload();
   };
   card.append(av, info, notif, out);
@@ -1163,8 +1242,17 @@ async function boot() {
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('SW registration failed:', e));
   }
-  if (notifSupported() && Notification.permission !== 'granted') {
-    notifEnabled = false; // stale pref without permission
+  if (typeof Notification !== 'undefined') {
+    if (Notification.permission !== 'granted') {
+      notifEnabled = false; // stale pref without permission
+    } else if (ls.get('ghost.notif') !== '0') {
+      notifEnabled = true; // permission granted and not explicitly muted
+      ls.set('ghost.notif', '1');
+    }
+  } else if (notifSupported()) {
+    // Android/TWA without the Notification constructor: notifications are
+    // delegated to the OS by the launcher, so respect the stored pref.
+    notifEnabled = ls.get('ghost.notif') === '1';
   }
 
   /* shared wiring */
