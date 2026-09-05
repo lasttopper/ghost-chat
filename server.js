@@ -10,6 +10,20 @@ const { WebSocketServer } = require('ws');
 const { createCore, attachHeartbeat } = require('./core');
 const digest = require('./digest');
 
+/* lightweight .env loader (no dependency) — for local runs.
+ * On Render/Railway, set the same vars in the dashboard instead. */
+(function loadDotEnv() {
+  try {
+    for (const line of fs.readFileSync(path.join(__dirname, '.env'), 'utf8').split('\n')) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+      if (!m) continue;
+      let v = m[2].trim();
+      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
+      if (!(m[1] in process.env)) process.env[m[1]] = v;
+    }
+  } catch {}
+})();
+
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_FILE = process.env.PULSE_DATA || path.join(__dirname, 'data.json');
