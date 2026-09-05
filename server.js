@@ -8,10 +8,13 @@ const fs = require('fs');
 const path = require('path');
 const { WebSocketServer } = require('ws');
 const { createCore, attachHeartbeat } = require('./core');
+const digest = require('./digest');
 
 const PORT = process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const DATA_FILE = process.env.PULSE_DATA || path.join(__dirname, 'data.json');
+const REPORT_TZ = process.env.REPORT_TZ || 'Asia/Kolkata';
+const REPORT_DIR = process.env.REPORT_DIR || path.join(__dirname, 'reports');
 
 /* ------------------------------ persistence ------------------------------ */
 
@@ -68,6 +71,35 @@ attachHeartbeat(wss);
 process.on('SIGTERM', () => { core.flush(); process.exit(0); });
 process.on('SIGINT',  () => { core.flush(); process.exit(0); });
 
+/* --------------------------- midnight digest --------------------------- */
+
+const TELEGRAM = {
+  token: process.env.TELEGRAM_BOT_TOKEN,
+  chatId: process.env.TELEGRAM_CHAT_ID,
+  apiUrl: process.env.TELEGRAM_API_URL, // test hook; defaults to api.telegram.org
+};
+
+function maybeRunDigest() {
+  const state = core.getState();
+  const now = Date.now();
+  if (!state.lastDigestDate) {
+    // first boot: start the clock — the first report goes out at the next midnight
+    core.setLastDigestDate(digest.tzDateStr(now, REPORT_TZ));
+    return;
+  }
+  const due = digest.dueDigest(state.lastDigestDate, now, REPORT_TZ);
+  if (!due) return;
+  core.setLastDigestDate(digest.tzDateStr(now, REPORT_TZ)); // mark before awaiting to avoid double-send
+  digest.runDigest(state, {
+    dateStr: due, tz: REPORT_TZ, outDir: REPORT_DIR, telegram: TELEGRAM,
+  }).catch((e) => console.error('[digest] failed:', e.message));
+}
+
+core.ready.then(() => {
+  maybeRunDigest();
+  setInterval(maybeRunDigest, 30000).unref();
+});
+
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`Pulse listening on http://0.0.0.0:${PORT}`);
+  console.log(`Ghost Chat listening on http://0.0.0.0:${PORT} (reports at midnight ${REPORT_TZ})`);
 });

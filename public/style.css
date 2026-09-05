@@ -364,3 +364,152 @@ input, textarea { font-family: inherit; }
 @media (max-width: 720px) {
   .sidebar { width: 200px; min-width: 200px; }
 }
+
+/* ============ Ghost Chat additions ============ */
+
+.ghost-logo {
+  width: 46px; height: 46px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3C9.9 3 6 7.3 6 13v14l4-3 3 3 3-3 3 3 3-3 4 3V13c0-5.7-3.9-10-10-10z' fill='%23a78bfa'/%3E%3Ccircle cx='12' cy='13' r='1.8' fill='%23161824'/%3E%3Ccircle cx='20' cy='13' r='1.8' fill='%23161824'/%3E%3C/svg%3E") center/contain no-repeat;
+  flex-shrink: 0;
+}
+.ghost-logo.small { width: 32px; height: 32px; }
+.login-logo.ghost-logo { width: 56px; height: 56px; margin: 0 auto 12px; }
+
+/* auth */
+.auth-firebase { margin-top: 8px; }
+.auth-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
+.auth-tab {
+  flex: 1; padding: 9px; border-radius: 8px;
+  border: 1px solid var(--border); background: var(--bg);
+  color: var(--muted); font-size: 14px;
+}
+.auth-tab.active { border-color: var(--accent); color: var(--text); background: rgba(99,102,241,.12); }
+.auth-firebase input {
+  width: 100%; margin-bottom: 10px;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); border-radius: var(--radius);
+  padding: 11px 13px; font-size: 14.5px; outline: none;
+}
+.auth-firebase input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
+.auth-error {
+  background: rgba(244,63,94,.12); border: 1px solid rgba(244,63,94,.4);
+  color: #fda4af; font-size: 13px;
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 10px;
+}
+.google-btn {
+  width: 100%; margin-top: 10px;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: #fff; color: #1f2937; border: none;
+  padding: 11px; border-radius: var(--radius);
+  font-size: 14.5px; font-weight: 600;
+}
+.google-btn:hover { filter: brightness(.96); }
+.auth-divider {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--faint); font-size: 12.5px; margin: 16px 0 12px;
+}
+.auth-divider::before, .auth-divider::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+.guest-note {
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 12.5px; color: var(--muted);
+  padding: 10px 12px; margin-bottom: 12px; text-align: left;
+}
+.guest-note code { color: #c7d2fe; }
+.guest-btn {
+  width: 100%; padding: 12px;
+  background: var(--panel-2); color: var(--text);
+  border: 1px dashed var(--border); border-radius: var(--radius);
+  font-size: 14.5px;
+}
+.guest-btn:hover { border-color: var(--accent); }
+
+/* username setup */
+.username-identity {
+  font-size: 13px; color: var(--muted);
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; margin-bottom: 12px;
+}
+#username-setup input {
+  width: 100%;
+  background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); border-radius: var(--radius);
+  padding: 12px 14px; font-size: 15px; outline: none;
+}
+#username-setup input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,.25); }
+
+/* DM list rows */
+.dm-item {
+  display: flex; align-items: center; gap: 9px;
+  padding: 6px 8px; border-radius: 8px;
+  color: var(--muted); font-size: 14.5px;
+  cursor: pointer; border: none; background: none;
+  width: 100%; text-align: left;
+}
+.dm-item:hover { background: var(--panel-2); color: var(--text); }
+.dm-item.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.dm-item.unread { color: var(--text); font-weight: 700; }
+.dm-avatar {
+  width: 24px; height: 24px; border-radius: 7px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 700; color: #fff; text-transform: uppercase;
+}
+.dm-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-item.active .badge { background: rgba(255,255,255,.9); color: var(--accent); }
+
+/* group lock icon */
+.ch-item .lock { font-size: 11px; opacity: .8; }
+
+/* header invite button */
+.invite-btn {
+  margin-left: 10px; vertical-align: middle;
+  background: var(--panel-2); color: var(--muted);
+  border: 1px solid var(--border); border-radius: 8px;
+  font-size: 12px; padding: 3px 9px;
+}
+.invite-btn:hover { color: var(--text); border-color: var(--accent); }
+
+/* create-group privacy picker */
+.privacy-picker { display: flex; gap: 10px; margin-top: 14px; }
+.privacy-opt {
+  flex: 1; display: flex; gap: 8px; align-items: flex-start;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px; cursor: pointer; font-size: 13.5px;
+}
+.privacy-opt:has(input:checked) { border-color: var(--accent); background: rgba(99,102,241,.1); }
+.privacy-opt input { margin-top: 3px; accent-color: var(--accent); }
+.privacy-opt small { font-size: 11.5px; }
+
+/* DM picker + report modals */
+.dm-user-list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.dm-user {
+  display: flex; align-items: center; gap: 10px;
+  background: none; border: none; color: var(--text);
+  padding: 9px 10px; border-radius: 8px; font-size: 14.5px; text-align: left;
+}
+.dm-user:hover { background: var(--panel-2); }
+.dm-user .status-dot { margin-left: auto; }
+#report-reason {
+  width: 100%; background: var(--bg);
+  border: 1px solid var(--border); color: var(--text);
+  border-radius: var(--radius); padding: 10px 12px;
+  font-size: 14px; outline: none; resize: vertical;
+}
+#report-reason:focus { border-color: var(--accent); }
+.report-target {
+  background: var(--bg); border-left: 3px solid var(--danger);
+  border-radius: 6px; padding: 8px 10px; margin-bottom: 12px;
+  font-size: 13px; color: var(--muted);
+  max-height: 72px; overflow: hidden;
+}
+.report-target b { color: var(--text); }
+
+/* invite link modal */
+.invite-row { display: flex; gap: 8px; }
+.invite-row input {
+  flex: 1; background: var(--bg);
+  border: 1px solid var(--border); color: #c7d2fe;
+  border-radius: var(--radius); padding: 10px 12px;
+  font-size: 13px; outline: none;
+}
+.invite-row .primary-btn { width: auto; padding: 10px 16px; }

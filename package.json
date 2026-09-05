@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "node test/e2e.js && node test/vercel-e2e.js",
+    "test": "node test/e2e.js && node test/vercel-e2e.js && node test/digest-e2e.js",
     "start": "node server.js"
   },
   "keywords": [],

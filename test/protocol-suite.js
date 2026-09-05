@@ -108,6 +108,89 @@ module.exports = async function runSuite(PORT) {
     'presence drops alice after grace expires', 9000);
   ok(presB2.online.includes('bob'), 'bob still online');
 
-  B.close();
+  /* 8. usernames: uniqueness + validation */
+  const Z = new Client(); // zoe, authId auth-1
+  await Z.connect(URL);
+  Z.send({ type: 'join', username: 'zoe', authId: 'auth-1', color: '#8b5cf6' });
+  const initZ = await Z.waitFor((e) => e.type === 'init' && e.username === 'zoe', 'zoe init');
+  ok(initZ.username === 'zoe', 'join with unique username succeeds');
+  const X = new Client();
+  await X.connect(URL);
+  X.send({ type: 'join', username: 'zoe', authId: 'auth-2', color: '#f43f5e' });
+  const taken = await X.waitFor((e) => e.type === 'username_taken', 'zoe claimed by another authId');
+  ok(taken.username === 'zoe', 'username uniqueness enforced across authIds');
+  X.send({ type: 'join', username: 'x!', authId: 'auth-2' });
+  const badName = await X.waitFor((e) => e.type === 'error' && /Username/.test(e.message), 'invalid username rejected');
+  ok(!!badName, 'username rules enforced (3-20, [a-z0-9_])');
+  X.send({ type: 'join', username: 'max', authId: 'auth-2', color: '#10b981' });
+  await X.waitFor((e) => e.type === 'init' && e.username === 'max', 'max init');
+
+  /* 9. private groups: invite-link only */
+  Z.send({ type: 'create_channel', name: 'vault', private: true });
+  const ccZ = await Z.waitFor((e) => e.type === 'channel_created' && e.channel.id === 'vault', 'creator gets private channel');
+  ok(typeof ccZ.channel.inviteCode === 'string' && ccZ.channel.inviteCode.length >= 6, 'private channel has invite code');
+  ok(!B.events.some((e) => e.type === 'channel_created' && e.channel.id === 'vault'), 'private channel_created not broadcast to non-members');
+  const initX2 = await (async () => {
+    const N = new Client();
+    await N.connect(URL);
+    N.send({ type: 'join', username: 'ann', authId: 'auth-3' });
+    const i = await N.waitFor((e) => e.type === 'init', 'ann init');
+    N._client = N;
+    return { i, N };
+  })();
+  ok(!initX2.i.channels.some((c) => c.id === 'vault'), 'non-member does not see private channel in init');
+  // non-member message into vault is dropped
+  const zEventsBefore = Z.events.length;
+  initX2.N.send({ type: 'message', channel: 'vault', text: 'sneaky' });
+  await wait(400);
+  ok(!Z.events.slice(zEventsBefore).some((e) => e.type === 'message' && e.message.text === 'sneaky'),
+    'non-member message into private channel is dropped');
+  // join by code
+  X.send({ type: 'join_channel', code: ccZ.channel.inviteCode });
+  const joinedX = await X.waitFor((e) => e.type === 'channel_joined' && e.channel.id === 'vault', 'max joins vault by code');
+  ok(joinedX.channel.members.includes('max'), 'member list updated after invite join');
+  const mjZ = await Z.waitFor((e) => e.type === 'member_joined' && e.username === 'max', 'creator notified of member');
+  ok(mjZ.channelId === 'vault', 'member_joined routed to members');
+  // bad code
+  X.send({ type: 'join_channel', code: 'nope-nope' });
+  const badCode = await X.waitFor((e) => e.type === 'error' && /invite link/i.test(e.message), 'bad invite code rejected');
+  ok(!!badCode, 'invalid invite code rejected');
+  // member message flows
+  X.send({ type: 'message', channel: 'vault', text: 'inside the vault' });
+  const vaultMsg = await Z.waitFor((e) => e.type === 'message' && e.message.text === 'inside the vault', 'member message reaches creator');
+  ok(vaultMsg.message.channel === 'vault', 'private message routed to members only');
+
+  /* 10. direct messages */
+  Z.send({ type: 'dm_start', to: 'max' });
+  const dmZ = await Z.waitFor((e) => e.type === 'dm_ready' && e.isNew, 'zoe gets dm_ready');
+  const dmX = await X.waitFor((e) => e.type === 'dm_ready' && e.isNew, 'max gets dm_ready');
+  ok(dmZ.conv.id === dmX.conv.id && dmZ.conv.members.length === 2, 'dm conversation created for both');
+  const dmId = dmZ.conv.id;
+  Z.send({ type: 'message', channel: dmId, text: 'psst max' });
+  const dmMsgX = await X.waitFor((e) => e.type === 'message' && e.message.text === 'psst max', 'dm message reaches partner');
+  ok(dmMsgX.message.channel === dmId, 'dm message carries conv id');
+  ok(!initX2.N.events.some((e) => e.type === 'message' && e.message.text === 'psst max'), 'dm not visible to third user');
+  const dmSelfErr = await (async () => {
+    Z.send({ type: 'dm_start', to: 'zoe' });
+    return Z.waitFor((e) => e.type === 'error' && /you/i.test(e.message), 'self dm rejected');
+  })();
+  ok(!!dmSelfErr, 'dm with self rejected');
+  // ann's init has no dms
+  const N2 = new Client();
+  await N2.connect(URL);
+  N2.send({ type: 'join', username: 'ann2', authId: 'auth-4' });
+  const initN2 = await N2.waitFor((e) => e.type === 'init', 'ann2 init');
+  ok(Array.isArray(initN2.dms) && initN2.dms.length === 0, "unrelated user's init has empty dms");
+
+  /* 11. reports */
+  const repMsgId = dmMsgX.message.id;
+  Z.send({ type: 'report', convId: dmId, messageId: repMsgId, reason: 'spam test' });
+  const ack = await Z.waitFor((e) => e.type === 'report_ack', 'report acknowledged');
+  ok(typeof ack.id === 'string' && ack.id.length > 0, 'report stored and acked');
+  Z.send({ type: 'report', convId: dmId, messageId: repMsgId, reason: '   ' });
+  const repErr = await Z.waitFor((e) => e.type === 'error' && /reason/i.test(e.message), 'empty report rejected');
+  ok(!!repErr, 'report requires a reason');
+
+  for (const c of [A2, B, Z, X, initX2.N, N2]) { try { c.close(); } catch {} }
   return { passed, failed };
 };

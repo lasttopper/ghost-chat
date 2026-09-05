@@ -3,23 +3,56 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Pulse — team chat</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%236366f1'/%3E%3Cpath d='M7 17h4l3-7 4 12 3-7h4' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>Ghost Chat</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 3C9.9 3 6 7.3 6 13v14l4-3 3 3 3-3 3 3 3-3 4 3V13c0-5.7-3.9-10-10-10z' fill='%23a78bfa'/%3E%3Ccircle cx='12' cy='13' r='1.8' fill='%23161824'/%3E%3Ccircle cx='20' cy='13' r='1.8' fill='%23161824'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="style.css">
+<script src="firebase-config.js"></script>
 </head>
 <body>
 
-  <!-- ===== Login screen ===== -->
+  <!-- ===== Login / auth screen ===== -->
   <div id="login" class="login hidden">
     <div class="login-card">
-      <div class="login-logo">
-        <svg viewBox="0 0 32 32" width="44" height="44"><rect width="32" height="32" rx="8" fill="#6366f1"/><path d="M7 17h4l3-7 4 12 3-7h4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <div class="login-logo ghost-logo"></div>
+      <h1>Ghost Chat</h1>
+      <p class="muted">Public groups, private groups, DMs — in real time.</p>
+
+      <div id="auth-firebase" class="auth-firebase hidden">
+        <div class="auth-tabs">
+          <button id="tab-signin" class="auth-tab active">Sign in</button>
+          <button id="tab-signup" class="auth-tab">Create account</button>
+        </div>
+        <input id="auth-email" type="email" placeholder="Email" autocomplete="email">
+        <input id="auth-password" type="password" placeholder="Password" autocomplete="current-password">
+        <div id="auth-error" class="auth-error hidden"></div>
+        <button id="auth-submit" class="primary-btn">Sign in</button>
+        <button id="auth-google" class="google-btn">
+          <svg viewBox="0 0 24 24" width="16" height="16"><path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.27-4.74 3.27-8.1z"/><path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84A11 11 0 0 0 12 23z"/><path fill="#FBBC05" d="M5.84 14.1a6.6 6.6 0 0 1 0-4.2V7.06H2.18a11 11 0 0 0 0 9.88l3.66-2.84z"/><path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15A11 11 0 0 0 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"/></svg>
+          Continue with Google
+        </button>
+        <div class="auth-divider"><span>or</span></div>
       </div>
-      <h1>Pulse</h1>
-      <p class="muted">Team messaging, in real time.</p>
-      <input id="login-name" maxlength="20" placeholder="Your display name" autocomplete="off" autofocus>
+
+      <div id="auth-guest-note" class="guest-note hidden">
+        Firebase isn't configured yet (see <code>public/firebase-config.js</code>),
+        so Ghost Chat is running in <b>Guest mode</b> — identities are per-browser.
+      </div>
+
+      <button id="guest-btn" class="guest-btn">Continue as guest 👻</button>
+    </div>
+  </div>
+
+  <!-- ===== Username setup ===== -->
+  <div id="username-setup" class="login hidden">
+    <div class="login-card">
+      <div class="login-logo ghost-logo"></div>
+      <h1>Pick your @username</h1>
+      <p class="muted">3–20 chars · lowercase letters, numbers, underscores · unique</p>
+      <div id="username-identity" class="username-identity hidden"></div>
+      <input id="username-input" maxlength="20" placeholder="e.g. night_owl" autocomplete="off" spellcheck="false">
+      <div id="username-error" class="auth-error hidden"></div>
       <div id="login-colors" class="swatches"></div>
-      <button id="login-btn" class="primary-btn">Join the workspace</button>
+      <button id="username-submit" class="primary-btn">Start chatting</button>
     </div>
   </div>
 
@@ -27,23 +60,27 @@
   <div id="app" class="app hidden">
     <aside class="sidebar">
       <div class="ws-header">
-        <div class="ws-logo">
-          <svg viewBox="0 0 32 32" width="30" height="30"><rect width="32" height="32" rx="8" fill="#6366f1"/><path d="M7 17h4l3-7 4 12 3-7h4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </div>
+        <div class="ws-logo ghost-logo small"></div>
         <div class="ws-meta">
-          <div class="ws-name">Pulse</div>
+          <div class="ws-name">Ghost Chat</div>
           <div class="ws-sub" id="online-count">connecting…</div>
         </div>
       </div>
 
       <div class="side-section grow">
         <div class="side-title">
-          <span>Channels</span>
-          <button id="add-channel" class="side-add" title="Create a channel">＋</button>
+          <span>Direct messages</span>
+          <button id="new-dm" class="side-add" title="New direct message">＋</button>
+        </div>
+        <div id="dm-list" class="side-list"></div>
+
+        <div class="side-title team-title">
+          <span>Groups</span>
+          <button id="add-channel" class="side-add" title="Create a group">＋</button>
         </div>
         <div id="channel-list" class="side-list"></div>
 
-        <div class="side-title team-title"><span>Team</span></div>
+        <div class="side-title team-title"><span>People</span></div>
         <div id="team-list" class="side-list"></div>
       </div>
 
@@ -53,13 +90,16 @@
     <main class="main">
       <div id="reconnect-banner" class="banner hidden">Connection lost — reconnecting…</div>
       <header class="channel-header">
-        <div class="ch-title"><span class="hash">#</span><span id="ch-name"></span></div>
+        <div class="ch-title">
+          <span id="ch-kind-icon">#</span><span id="ch-name"></span>
+          <button id="invite-btn" class="invite-btn hidden" title="Copy invite link">🔗 Invite</button>
+        </div>
         <div id="ch-topic" class="ch-topic"></div>
       </header>
       <div id="messages" class="messages"></div>
       <div id="typing-bar" class="typing-bar"></div>
       <div class="composer">
-        <textarea id="input" rows="1" placeholder="Message #general"></textarea>
+        <textarea id="input" rows="1" placeholder="Message…"></textarea>
         <div class="composer-right">
           <button id="emoji-btn" class="icon-btn" title="Insert emoji">🙂</button>
           <button id="send-btn" class="send-btn" title="Send message">➤</button>
@@ -74,15 +114,66 @@
   <!-- toasts -->
   <div id="toasts" class="toasts"></div>
 
-  <!-- create-channel modal -->
+  <!-- create-group modal -->
   <div id="modal-backdrop" class="modal-backdrop hidden">
     <div class="modal">
-      <h3>Create a channel</h3>
+      <h3>Create a group</h3>
       <p class="muted">Lowercase letters, numbers and hyphens.</p>
       <input id="new-channel-name" maxlength="21" placeholder="e.g. design-team" autocomplete="off">
+      <div class="privacy-picker">
+        <label class="privacy-opt">
+          <input type="radio" name="group-privacy" value="public" checked>
+          <span><b>🌍 Public</b><br><small class="muted">Everyone can see and join</small></span>
+        </label>
+        <label class="privacy-opt">
+          <input type="radio" name="group-privacy" value="private">
+          <span><b>🔒 Private</b><br><small class="muted">Joinable only via invite link</small></span>
+        </label>
+      </div>
       <div class="modal-actions">
         <button id="modal-cancel">Cancel</button>
         <button id="modal-create" class="primary-btn">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- new DM modal -->
+  <div id="dm-modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <h3>New direct message</h3>
+      <p class="muted">Pick someone to start a private 1-on-1 chat.</p>
+      <div id="dm-user-list" class="dm-user-list"></div>
+      <div class="modal-actions">
+        <button id="dm-modal-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- report modal -->
+  <div id="report-modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <h3>🚩 Report message</h3>
+      <div id="report-target" class="report-target"></div>
+      <p class="muted">Reports are compiled and sent to the admins every day at midnight (IST).</p>
+      <textarea id="report-reason" rows="3" maxlength="500" placeholder="Why are you reporting this? (required)"></textarea>
+      <div class="modal-actions">
+        <button id="report-cancel">Cancel</button>
+        <button id="report-submit" class="primary-btn">Submit report</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- invite link modal -->
+  <div id="invite-modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <h3>🔗 Invite link</h3>
+      <p class="muted">Anyone with this link can join the group.</p>
+      <div class="invite-row">
+        <input id="invite-link" readonly>
+        <button id="invite-copy" class="primary-btn">Copy</button>
+      </div>
+      <div class="modal-actions">
+        <button id="invite-close">Done</button>
       </div>
     </div>
   </div>
