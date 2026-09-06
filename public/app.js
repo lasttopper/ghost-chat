@@ -170,7 +170,9 @@ function notifyMessage(m) {
     ? (conv.type === 'dm' ? `@${dmPartner(conv)}` : `${conv.private ? '🔒 ' : '#'}${conv.name}`)
     : 'Ghost Chat';
   const title = `${where} — @${m.username}`;
-  const body = m.text.length > 110 ? m.text.slice(0, 110) + '…' : m.text;
+  const body = m.text
+    ? (m.text.length > 110 ? m.text.slice(0, 110) + '…' : m.text)
+    : (m.image ? '📷 Photo' : 'New message');
 
   // Native Android app (WebView): a WebView has no Web Notification UI, so the
   // native side shows the system notification. window.AndroidBridge is injected
@@ -369,6 +371,12 @@ function connect() {
     // push while offline; the native side answers via window.__ghostFcmToken.
     if (isNativeApp() && window.AndroidBridge.requestFcmToken) {
       try { window.AndroidBridge.requestFcmToken(); } catch {}
+    }
+    // APK: raise the persistent foreground notification — it keeps the socket
+    // (and therefore instant delivery) alive while Android would otherwise
+    // freeze or kill the app in the background.
+    if (isNativeApp() && window.AndroidBridge.startKeepAlive) {
+      try { window.AndroidBridge.startKeepAlive(); } catch {}
     }
   };
   S.ws.onmessage = (ev) => {
@@ -839,10 +847,27 @@ function buildMsg(m, grouped, fresh) {
     }
     body.appendChild(head);
   }
-  const text = document.createElement('div');
-  text.className = 'msg-text';
-  renderRichText(text, m.text);
-  body.appendChild(text);
+  if (m.image) {
+    const wrap = document.createElement('div');
+    wrap.className = 'msg-img-wrap loading';
+    const img = document.createElement('img');
+    img.className = 'msg-img';
+    img.src = m.image;
+    img.alt = `Image shared by @${m.username}`;
+    img.loading = 'lazy';
+    img.referrerPolicy = 'no-referrer';
+    img.addEventListener('load', () => wrap.classList.remove('loading'));
+    img.addEventListener('error', () => wrap.classList.remove('loading'));
+    img.addEventListener('click', () => openLightbox(m.image));
+    wrap.appendChild(img);
+    body.appendChild(wrap);
+  }
+  if (m.text || !m.image) {
+    const text = document.createElement('div');
+    text.className = 'msg-text';
+    renderRichText(text, m.text);
+    body.appendChild(text);
+  }
   body.appendChild(buildReactions(m));
 
   const conv = getConv(m.channel);
@@ -1138,14 +1163,93 @@ document.addEventListener('keydown', (e) => {
 
 /* ------------------------------ composer ------------------------------ */
 
+/* Pending image attachment: uploaded to ImgBB via our server as soon as the
+ * user picks a file; sent together with the next message (caption optional). */
+let pendingImage = null;
+
+function setAttachPreview(on, label) {
+  const box = $('#attach-preview');
+  if (!on) { box.classList.add('hidden'); return; }
+  $('#attach-label').textContent = label;
+  box.classList.remove('hidden');
+}
+
+/* Downscale in the browser before upload: keeps uploads fast, cheap and
+ * inside the host's size limits. GIFs become a still JPEG frame. */
+function downscaleImage(file, maxSide, quality) {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        resolve(cv.toDataURL('image/jpeg', quality));
+      } catch { resolve(null); }
+      finally { URL.revokeObjectURL(url); }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); resolve(null); };
+    img.src = url;
+  });
+}
+
+async function handleImagePick(file) {
+  if (!file) return;
+  if (!S.active) { toast('Open a conversation first.'); return; }
+  if (!/^image\/(png|jpeg|webp|gif)$/.test(file.type)) {
+    toast('Pick a PNG, JPEG, WEBP or GIF image.');
+    return;
+  }
+  const dataUrl = await downscaleImage(file, 1600, 0.85);
+  if (!dataUrl) { toast('Could not read that image.'); return; }
+  $('#attach-thumb').src = dataUrl;
+  setAttachPreview(true, 'Uploading…');
+  try {
+    const r = await fetch('/api/upload-image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok || !j.url) throw new Error(j.error || ('HTTP ' + r.status));
+    pendingImage = j.url;
+    setAttachPreview(true, 'Tap send to post this image (add a caption if you like)');
+  } catch (e) {
+    setAttachPreview(false);
+    toast(e.message || 'Image upload failed — please try again.');
+  }
+}
+
+function clearPendingImage() {
+  pendingImage = null;
+  setAttachPreview(false);
+}
+
+function openLightbox(src) {
+  $('#lightbox-img').src = src;
+  $('#lightbox').classList.remove('hidden');
+}
+function closeLightbox() {
+  $('#lightbox').classList.add('hidden');
+  $('#lightbox-img').src = '';
+}
+
 function sendMessage() {
   const input = $('#input');
   const text = input.value.trim();
-  if (!text || !S.active) return;
-  if (!send({ type: 'message', channel: S.active, text })) {
+  const image = pendingImage;
+  if ((!text && !image) || !S.active) return;
+  const msg = { type: 'message', channel: S.active, text };
+  if (image) msg.image = image;
+  if (!send(msg)) {
     toast("You're offline — message not sent. It's still in the box.");
-    return; // keep the draft so nothing is lost
+    return; // keep the draft (and attachment) so nothing is lost
   }
+  clearPendingImage();
   input.value = '';
   input.style.height = 'auto';
   clearTimeout(S.typingStopTimer);
@@ -1612,8 +1716,12 @@ function renderMe() {
   out.title = 'Sign out';
   out.textContent = '⏻';
   out.onclick = async () => {
-    // Stop pushes for this device before the session goes away.
-    if (isNativeApp()) { try { send({ type: 'push_unregister' }); } catch {} }
+    // Stop pushes for this device before the session goes away, and drop the
+    // persistent "active" notification (no session left to keep alive).
+    if (isNativeApp()) {
+      try { send({ type: 'push_unregister' }); } catch {}
+      try { window.AndroidBridge.stopKeepAlive(); } catch {}
+    }
     if (nativeAuth) { try { window.AndroidBridge.googleSignOut(); } catch {} nativeAuth = false; }
     if (S.fb) { try { await S.fb.authMod.signOut(S.fb.auth); } catch {} }
     // keep the per-browser guest identity + colors so the name can be
@@ -1799,6 +1907,15 @@ async function boot() {
   /* shared wiring */
   $('#send-btn').onclick = sendMessage;
   $('#emoji-btn').onclick = (e) => openPicker(e.currentTarget, { mode: 'composer' });
+  $('#image-btn').onclick = () => $('#image-file').click();
+  $('#image-file').onchange = (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = ''; // allow re-picking the same file
+    if (f) handleImagePick(f);
+  };
+  $('#attach-cancel').onclick = clearPendingImage;
+  $('#lightbox').onclick = closeLightbox;
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
   $('#add-channel').onclick = openModal;
   $('#modal-cancel').onclick = () => $('#modal-backdrop').classList.add('hidden');
   $('#modal-create').onclick = createChannel;

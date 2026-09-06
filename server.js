@@ -73,6 +73,7 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ ok: true }));
     return;
   }
+  if (req.method === 'POST' && pathname === '/api/upload-image') { handleImageUpload(req, res); return; }
   if (pathname === '/') pathname = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC_DIR, pathname));
   if (!filePath.startsWith(PUBLIC_DIR + path.sep) && filePath !== PUBLIC_DIR) {
@@ -86,6 +87,71 @@ const server = http.createServer((req, res) => {
     }).end(data);
   });
 });
+
+/* ------------------------------ image upload ------------------------------
+ * Chat image sharing is hosted on ImgBB. The client downscales its picture
+ * and POSTs it here; we forward it to ImgBB so the API key never reaches the
+ * browser. Responds { ok:true, url } with the permanent direct image link. */
+
+const IMGBB = {
+  key: process.env.IMGBB_API_KEY || '',
+  apiUrl: process.env.IMGBB_API_URL || 'https://api.imgbb.com/1/upload', // test hook
+  maxBytes: 12 * 1024 * 1024, // data-URL body cap (~9 MB of actual image)
+};
+
+const DATA_URL_RE = /^data:image\/(png|jpeg|jpg|webp|gif);base64,([A-Za-z0-9+/=]+)$/;
+
+function handleImageUpload(req, res) {
+  const done = (status, obj) => {
+    if (!res.headersSent) {
+      res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+    }
+    res.end(JSON.stringify(obj));
+  };
+  if (!IMGBB.key) return done(503, { ok: false, error: 'Image uploads are not configured on this server.' });
+
+  const chunks = [];
+  let size = 0;
+  req.on('data', (c) => {
+    size += c.length;
+    if (size > IMGBB.maxBytes) { done(413, { ok: false, error: 'That image is too large (max ~9 MB).' }); req.destroy(); return; }
+    chunks.push(c);
+  });
+  req.on('end', async () => {
+    if (size > IMGBB.maxBytes) return;
+    let payload;
+    try { payload = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+    catch { return done(400, { ok: false, error: 'Expected JSON with an "image" data URL.' }); }
+
+    const dataUrl = String((payload && payload.image) || '');
+    const match = DATA_URL_RE.exec(dataUrl);
+    if (!match) return done(400, { ok: false, error: 'Send a PNG, JPEG, WEBP or GIF image.' });
+    const b64 = match[2];
+    if (b64.length < 64) return done(400, { ok: false, error: 'That image is empty.' });
+
+    const form = new URLSearchParams({ key: IMGBB.key, image: b64 });
+    if (payload.name) form.set('name', String(payload.name).replace(/[^\w .-]/g, '').slice(0, 60) || 'photo');
+    try {
+      const r = await fetch(IMGBB.apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: form.toString(),
+      });
+      const json = await r.json().catch(() => null);
+      const url = json && json.data && json.data.url;
+      if (!r.ok || !json || json.success !== true || !/^https:\/\/i\.ibb\.co\//.test(String(url || ''))) {
+        const msg = json && json.error && json.error.message ? String(json.error.message) : `HTTP ${r.status}`;
+        console.error('ImgBB upload failed:', msg);
+        return done(502, { ok: false, error: 'The image host rejected the upload. Please try again.' });
+      }
+      done(200, { ok: true, url: String(url) });
+    } catch (e) {
+      console.error('ImgBB upload error:', e.message);
+      done(502, { ok: false, error: 'Could not reach the image host. Please try again.' });
+    }
+  });
+  req.on('error', () => { try { res.destroy(); } catch {} });
+}
 
 /* ------------------------------ websockets ------------------------------ */
 

@@ -22,6 +22,7 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
+import android.webkit.ValueCallback;
 import android.webkit.WebViewClient;
 
 import androidx.credentials.Credential;
@@ -70,6 +71,10 @@ public class MainActivity extends Activity {
 
     // Live instance so PushService can forward FCM token refreshes to the page.
     private static volatile MainActivity instance;
+
+    // Image picker plumbing for the composer's <input type="file">.
+    private static final int REQ_PICK_IMAGE = 4711;
+    private ValueCallback<Uri[]> filePathCallback;
 
     private WebView webView;
     private ScreenshotObserver screenshotObserver;
@@ -130,11 +135,35 @@ public class MainActivity extends Activity {
                 return true;
             }
         });
-        webView.setWebChromeClient(new WebChromeClient());
+        // Image sharing: WebView needs an explicit file chooser to open the
+        // <input type="file"> in the page's composer.
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                filePathCallback = callback;
+                try {
+                    Intent pick = new Intent(Intent.ACTION_GET_CONTENT);
+                    pick.setType("image/*");
+                    pick.addCategory(Intent.CATEGORY_OPENABLE);
+                    pick.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivityForResult(Intent.createChooser(pick, "Choose an image"),
+                            REQ_PICK_IMAGE);
+                } catch (Throwable t) {
+                    filePathCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
 
         instance = this;
         Notifications.ensureChannel(this);
         requestRuntimePermissions();
+        // Persistent "active" notification keeps the socket connected while the
+        // app is backgrounded (FCM push covers the process being killed anyway).
+        KeepAliveService.start(this);
 
         // Deep link (verified App Link, e.g. an invite link ?join=CODE): open
         // exactly that URL; otherwise load the app home.
@@ -285,6 +314,24 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != REQ_PICK_IMAGE) return;
+        ValueCallback<Uri[]> cb = filePathCallback;
+        filePathCallback = null;
+        if (cb == null) return;
+        Uri[] result = null;
+        if (resultCode == Activity.RESULT_OK && data != null) {
+            Uri uri = data.getData();
+            if (uri == null && data.getClipData() != null && data.getClipData().getItemCount() > 0) {
+                uri = data.getClipData().getItemAt(0).getUri();
+            }
+            if (uri != null) result = new Uri[] { uri };
+        }
+        cb.onReceiveValue(result); // null tells the page the pick was cancelled
+    }
+
     /* --------------------------- JS bridge (window.AndroidBridge) --------------------------- */
 
     private final class NativeBridge {
@@ -292,7 +339,15 @@ public class MainActivity extends Activity {
         public boolean isNative() { return true; }
 
         @JavascriptInterface
-        public String getAppVersion() { return "2.2.0"; }
+        public String getAppVersion() { return "2.5.0"; }
+
+        /** Raise the persistent foreground notification (keeps the app alive). */
+        @JavascriptInterface
+        public void startKeepAlive() { KeepAliveService.start(MainActivity.this); }
+
+        /** Drop it again - called on sign-out. */
+        @JavascriptInterface
+        public void stopKeepAlive() { KeepAliveService.stop(MainActivity.this); }
 
         /** Called by the page instead of the Web Notification API while in the APK. */
         @JavascriptInterface

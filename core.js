@@ -139,6 +139,12 @@ const sanitizeText = (t) =>
 
 const sanitizeColor = (c) => (/^#[0-9a-fA-F]{6}$/.test(String(c)) ? String(c) : '#8b5cf6');
 
+/* Image attachments must be ImgBB direct links (the only host our upload
+ * endpoint can produce). Anything else is dropped — chat never carries
+ * arbitrary remote URLs. */
+const IMG_URL_RE = /^https:\/\/i\.ibb\.co\/[A-Za-z0-9._~%/-]{4,300}\.(?:png|jpe?g|webp|gif|bmp)(?:\?[A-Za-z0-9._~%&=-]{0,200})?$/i;
+const sanitizeImageUrl = (v) => (typeof v === 'string' && IMG_URL_RE.test(v) ? v : '');
+
 const validUsername = (u) => USERNAME_RE.test(String(u || '').toLowerCase());
 
 const newInviteCode = () => crypto.randomBytes(6).toString('base64url'); // ~8 chars
@@ -248,7 +254,9 @@ function createCore(persistence, options = {}) {
     const title = conv.type === 'dm'
       ? `@${m.username}`
       : `${conv.private ? '\u{1F512} ' : '#'}${conv.name} \u2014 @${m.username}`;
-    const body = (m.text || '').length > 110 ? m.text.slice(0, 110) + '\u2026' : (m.text || '');
+    const body = (m.text || '')
+      ? ((m.text || '').length > 110 ? m.text.slice(0, 110) + '\u2026' : m.text)
+      : (m.image ? '\u{1F4F7} Photo' : '');
     // Same visibility rule as the socket broadcast: DMs/private groups have an
     // explicit member list; public channels are for everyone (convMembers null).
     const targets = convMembers(conv)
@@ -258,7 +266,9 @@ function createCore(persistence, options = {}) {
       const set = pushTokens.get(member);
       if (!set || !set.size) continue;
       for (const tok of [...set.keys()]) {
-        push.sendTo(tok, { title, body, data: { conv: conv.id } })
+        const data = { conv: conv.id };
+        if (m.image) data.image = m.image;
+        push.sendTo(tok, { title, body, data })
           .then((r) => { if (r === 'invalid') set.delete(tok); }) // dead token
           .catch(() => {});
       }
@@ -419,11 +429,13 @@ function createCore(persistence, options = {}) {
         if (!me) return;
         const conv = findConv(msg.channel);
         const text = sanitizeText(msg.text);
-        if (!conv || !text || !inConv(conv, me.username)) return;
+        const image = sanitizeImageUrl(msg.image);
+        if (!conv || (!text && !image) || !inConv(conv, me.username)) return;
         const m = {
           id: newId(), channel: conv.id, username: me.username, color: me.color,
           ts: Date.now(), system: false, text, reactions: {},
         };
+        if (image) m.image = image;
         conv.messages.push(m);
         if (conv.messages.length > MAX_MESSAGES_PER_CHANNEL) {
           conv.messages.splice(0, conv.messages.length - MAX_MESSAGES_PER_CHANNEL);
@@ -433,7 +445,8 @@ function createCore(persistence, options = {}) {
         pushForMessage(conv, m);
 
         // Assistant auto-reply: any DM with GhostBot gets a guided answer.
-        if (conv.type === 'dm' && conv.members.includes(BOT) && me.username !== BOT) {
+        // Image-only messages get no auto-reply (nothing to answer yet).
+        if (conv.type === 'dm' && conv.members.includes(BOT) && me.username !== BOT && text) {
           const reply = {
             id: newId(), channel: conv.id, username: BOT, color: BOT_COLOR,
             ts: Date.now() + 1, system: false, bot: true, text: botReply(text), reactions: {},
@@ -688,7 +701,7 @@ function createCore(persistence, options = {}) {
           convId: conv.id,
           convKind: conv.type === 'dm' ? 'dm' : (conv.private ? 'private' : 'public'),
           messageId: m ? m.id : null,
-          messageText: m ? m.text : '',
+          messageText: m ? (m.text || (m.image ? '\u{1F4F7} Photo' : '')) : '',
           reason,
         };
         state.reports.push(report);

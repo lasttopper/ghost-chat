@@ -19,7 +19,15 @@ public class PushService extends FirebaseMessagingService {
         String title = data.get("title");
         String body = data.get("body");
         if (title == null || title.isEmpty()) title = "Ghost Chat";
-        Notifications.show(this, title, body == null ? "" : body, data.get("conv"));
+        String tag = data.get("conv");
+        String image = data.get("image");
+        if (image != null && image.startsWith("https://i.ibb.co/")) {
+            // onMessageReceived runs on a background thread, so the image
+            // download inside showImage is safe here.
+            Notifications.showImage(this, title, body == null ? "" : body, tag, image);
+        } else {
+            Notifications.show(this, title, body == null ? "" : body, tag);
+        }
     }
 
     @Override

@@ -91,7 +91,8 @@ function buildDigestText(state, dateStr, tz) {
     if (!msgs.length) { L.push('  (no activity)'); continue; }
     for (const m of msgs) {
       const who = m.system ? '*' : '@' + m.username;
-      L.push(`  [${fmtTime(m.ts, tz)}] ${who}: ${m.text}`);
+      const what = m.text || (m.image ? '📷 ' + m.image : '');
+      L.push(`  [${fmtTime(m.ts, tz)}] ${who}: ${what}`);
     }
   }
   L.push('', `Total messages on ${dateStr}: ${total}`);
