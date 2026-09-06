@@ -46,11 +46,17 @@ ok(/AndroidBridge\.stopKeepAlive/.test(app), 'web stops keep-alive on sign-out')
 ok(/image-file/.test(app) && /handleImagePick/.test(app) && /\/api\/upload-image/.test(app),
   'composer image button uploads via the server endpoint');
 ok(/openLightbox/.test(app) && /m\.image/.test(app), 'image messages render + open fullscreen');
+ok(/lb-close/.test(app) && /lb-zoom-in/.test(app) && /lb-zoom-out/.test(app) && /lbSetScale/.test(app),
+  'viewer has close button + zoom in/out controls');
+ok(/pinch/.test(app) && /dblclick/.test(app) && /wheel/.test(app), 'viewer supports pinch, double-tap and wheel zoom');
 ok(/IMGBB_CONFIG/.test(app) && /uploadImage/.test(app), 'client-side direct upload with server fallback');
 const cfg = read('public/imgbb-config.js');
 ok(/apiKey:\s*'[0-9a-f]{32}'/.test(cfg) && /api\.imgbb\.com/.test(cfg), 'imgbb config present with key + endpoint');
 const html = read('public/index.html');
 ok(/imgbb-config\.js/.test(html) && /app\.js\?v=\d+/.test(html), 'config script loaded before app.js');
+ok(/lb-close/.test(html) && /lb-zoom-in/.test(html) && /lb-zoom-out/.test(html) && /lb-zoom-level/.test(html),
+  'viewer close + zoom controls present in the page');
+ok(/class="lightbox/.test(html) && /lightbox-bar/.test(html), 'viewer markup + control bar present');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

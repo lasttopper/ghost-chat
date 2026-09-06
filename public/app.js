@@ -1252,13 +1252,122 @@ function clearPendingImage() {
   setAttachPreview(false);
 }
 
+/* Fullscreen photo viewer: pinch / wheel / buttons to zoom (1x-5x),
+ * drag to pan, double-tap toggles zoom, ✕ (or backdrop tap at 1x) closes. */
+const LB = { scale: 1, x: 0, y: 0, moved: false };
+
+function lbApply() {
+  const img = $('#lightbox-img');
+  img.style.transform = `translate(${LB.x}px, ${LB.y}px) scale(${LB.scale})`;
+  $('#lb-zoom-level').textContent = Math.round(LB.scale * 100) + '%';
+  $('#lightbox').classList.toggle('zoomed', LB.scale > 1.01);
+}
+
+function lbSetScale(next, px = 0, py = 0) {
+  const s = Math.min(5, Math.max(1, next));
+  // keep the point under px,py stable while zooming
+  const k = s / LB.scale;
+  LB.x = px - (px - LB.x) * k;
+  LB.y = py - (py - LB.y) * k;
+  LB.scale = s;
+  if (LB.scale <= 1.01) { LB.x = 0; LB.y = 0; }
+  lbApply();
+}
+
+function lbReset() { LB.scale = 1; LB.x = 0; LB.y = 0; lbApply(); }
+
 function openLightbox(src) {
+  lbReset();
   $('#lightbox-img').src = src;
   $('#lightbox').classList.remove('hidden');
 }
 function closeLightbox() {
   $('#lightbox').classList.add('hidden');
   $('#lightbox-img').src = '';
+  lbReset();
+}
+
+function initLightbox() {
+  const box = $('#lightbox');
+  const img = $('#lightbox-img');
+
+  $('#lb-close').addEventListener('click', (e) => { e.stopPropagation(); closeLightbox(); });
+  $('#lb-zoom-in').addEventListener('click', (e) => { e.stopPropagation(); lbSetScale(LB.scale * 1.4); });
+  $('#lb-zoom-out').addEventListener('click', (e) => { e.stopPropagation(); lbSetScale(LB.scale / 1.4); });
+  $('#lb-zoom-level').addEventListener('click', (e) => { e.stopPropagation(); lbReset(); });
+
+  /* backdrop tap closes — but only at 1x and not right after a drag */
+  box.addEventListener('click', (e) => {
+    if (e.target !== box && e.target !== img) return;
+    if (LB.moved) { LB.moved = false; return; }
+    if (LB.scale > 1.01) return;
+    closeLightbox();
+  });
+
+  /* mouse: drag to pan, wheel to zoom, double-click toggles */
+  let md = null;
+  img.addEventListener('mousedown', (e) => {
+    if (LB.scale <= 1.01) return;
+    md = { x: e.clientX - LB.x, y: e.clientY - LB.y };
+    LB.moved = false;
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!md) return;
+    LB.x = e.clientX - md.x; LB.y = e.clientY - md.y;
+    LB.moved = true;
+    lbApply();
+  });
+  window.addEventListener('mouseup', () => { md = null; });
+  box.addEventListener('wheel', (e) => {
+    if (box.classList.contains('hidden')) return;
+    e.preventDefault();
+    const r = img.getBoundingClientRect();
+    lbSetScale(LB.scale * (e.deltaY < 0 ? 1.18 : 1 / 1.18),
+      e.clientX - (r.left + r.width / 2), e.clientY - (r.top + r.height / 2));
+  }, { passive: false });
+  img.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    if (LB.scale > 1.01) lbReset(); else lbSetScale(2.5, 0, 0);
+  });
+
+  /* touch: one-finger pan, two-finger pinch, double-tap toggle */
+  let t = null, lastTap = 0;
+  box.addEventListener('touchstart', (e) => {
+    if (e.target !== box && e.target !== img) return;
+    if (e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      t = { pinch: true, d0: Math.hypot(dx, dy) || 1, s0: LB.scale };
+    } else if (e.touches.length === 1) {
+      t = { pinch: false, x: e.touches[0].clientX - LB.x, y: e.touches[0].clientY - LB.y };
+      LB.moved = false;
+    }
+  }, { passive: true });
+  box.addEventListener('touchmove', (e) => {
+    if (!t || box.classList.contains('hidden')) return;
+    e.preventDefault();
+    if (t.pinch && e.touches.length === 2) {
+      const dx = e.touches[0].clientX - e.touches[1].clientX;
+      const dy = e.touches[0].clientY - e.touches[1].clientY;
+      lbSetScale(t.s0 * (Math.hypot(dx, dy) / t.d0));
+    } else if (!t.pinch && e.touches.length === 1 && LB.scale > 1.01) {
+      LB.x = e.touches[0].clientX - t.x; LB.y = e.touches[0].clientY - t.y;
+      LB.moved = true;
+      lbApply();
+    }
+  }, { passive: false });
+  box.addEventListener('touchend', (e) => {
+    if (e.target !== box && e.target !== img) { t = null; return; }
+    const now = Date.now();
+    if (!t || !t.pinch) {
+      if (!LB.moved && now - lastTap < 300) { // double-tap
+        if (LB.scale > 1.01) lbReset(); else lbSetScale(2.5, 0, 0);
+        lastTap = 0;
+      } else lastTap = now;
+    }
+    t = null;
+  }, { passive: true });
 }
 
 function sendMessage() {
@@ -1937,7 +2046,7 @@ async function boot() {
     if (f) handleImagePick(f);
   };
   $('#attach-cancel').onclick = clearPendingImage;
-  $('#lightbox').onclick = closeLightbox;
+  initLightbox();
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLightbox(); });
   $('#add-channel').onclick = openModal;
   $('#modal-cancel').onclick = () => $('#modal-backdrop').classList.add('hidden');
