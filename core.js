@@ -13,9 +13,57 @@ const MAX_MESSAGES_PER_CHANNEL = 500;
 const MAX_REPORTS = 500;
 const CHANNEL_NAME_RE = /^[a-z0-9][a-z0-9-]{0,20}$/;
 const USERNAME_RE = /^[a-z0-9_]{3,20}$/;
-const RESERVED = new Set(['system', 'ghostbot', 'admin', 'root', 'everyone', 'all', 'here']);
+// Privileged / impersonation names nobody may claim (matched after lowercasing).
+const RESERVED = new Set([
+  'system', 'ghostbot', 'ghost', 'ghostchat', 'bot', 'bots', 'assistant',
+  'admin', 'administrator', 'admins', 'owner', 'owners', 'root', 'mod', 'mods',
+  'moderator', 'moderators', 'support', 'help', 'helpdesk', 'staff', 'team',
+  'official', 'info', 'contact', 'service', 'everyone', 'all', 'here',
+  'channel', 'channels', 'null', 'undefined', 'me', 'unknown', 'deleted',
+]);
+const BOT = 'ghostbot';            // the built-in assistant/guide
+const BOT_COLOR = '#8b5cf6';
 const OFFLINE_GRACE_MS = 4000;
 const SAVE_DEBOUNCE_MS = 300;
+
+/* --------------------------- assistant (GhostBot) --------------------------- */
+
+const BOT_GUIDE =
+  "👋 I'm GhostBot, your guide. Here's the quick tour:\n" +
+  '• Groups — tap ＋ beside “Groups”. Choose 🌍 Public (everyone) or 🔒 Private (invite only).\n' +
+  '• Private groups — share the 🔗 Invite link. As an admin, open 👥 Members to add or remove people and promote other admins.\n' +
+  '• Direct messages — tap ＋ beside “Direct messages”, or anyone in the People list.\n' +
+  '• Your @username — 3–20 chars, lowercase letters/numbers/underscore. Role names like “admin” or “owner” are reserved.\n' +
+  '• Extras — hover a message to react 😀 or report 🚩.\n' +
+  'Ask me about: groups, invites, admins, DMs, or usernames.';
+
+// Keyword-routed help for the assistant DM.
+function botReply(rawText) {
+  const t = String(rawText || '').toLowerCase();
+  const has = (...words) => words.some((w) => t.includes(w));
+  if (has('group', 'create', 'channel', 'make')) {
+    return 'To create a group, tap the ＋ next to “Groups”. Pick 🌍 Public so everyone can see and join, or 🔒 Private so it’s invite-link only. You become its owner-admin.';
+  }
+  if (has('invite', 'link', 'share')) {
+    return 'In a private group, tap 🔗 Invite to copy its invite link. Anyone who opens it joins automatically. Only the owner/admins can also add people directly from 👥 Members.';
+  }
+  if (has('admin', 'remove', 'kick', 'promote', 'demote', 'member', 'owner')) {
+    return 'Group admins manage members from 👥 Members: add people, Remove a member, or Make admin / Demote. The owner (creator) can’t be removed or demoted.';
+  }
+  if (has('username', 'name', 'handle', 'change')) {
+    return 'Your @username is 3–20 characters: lowercase letters, numbers and underscores. Role names such as admin, owner, mod, system and ghostbot are reserved and can’t be taken.';
+  }
+  if (has('dm', 'direct', 'private message', 'message someone')) {
+    return 'To DM someone, tap ＋ next to “Direct messages” and pick a person, or tap their name in the People list. DMs are private 1-on-1 chats.';
+  }
+  if (has('help', 'guide', 'start', 'commands', 'menu', '?')) {
+    return BOT_GUIDE;
+  }
+  if (has('hi', 'hello', 'hey', 'yo', 'sup')) {
+    return "Hey! I'm GhostBot 👻 Type ‘help’ for the full guide, or ask me about groups, invites, admins, DMs, or usernames.";
+  }
+  return "I'm GhostBot, your guide 👻 Type ‘help’ for the full tour, or ask about: groups, invites, admins, DMs, or usernames.";
+}
 
 /* ------------------------------ helpers ------------------------------ */
 
@@ -24,7 +72,9 @@ function seedState() {
   return {
     nextMessageId: 1,
     lastDigestDate: null,
-    users: {},
+    users: {
+      ghostbot: { color: BOT_COLOR, authId: 'system:ghostbot', displayName: 'GhostBot', bot: true, createdAt: now },
+    },
     channels: [
       {
         id: 'general', name: 'general', type: 'channel', private: false, inviteCode: null,
@@ -50,8 +100,17 @@ function seedState() {
 
 function normalizeState(s) {
   s.users = s.users || {};
-  // Remove the legacy seeded bot so no "fake user" lingers in older saved state.
+  // Remove the legacy capitalized bot from older saved state...
   delete s.users['GhostBot'];
+  // ...and guarantee the built-in assistant always exists (flagged as a bot so
+  // clients show it as a guide, not as a person in the People list).
+  if (!s.users[BOT] || s.users[BOT].bot !== true) {
+    const prev = s.users[BOT] || {};
+    s.users[BOT] = {
+      color: BOT_COLOR, authId: 'system:ghostbot', displayName: 'GhostBot',
+      bot: true, createdAt: prev.createdAt || Date.now(),
+    };
+  }
   s.channels = s.channels || [];
   s.dms = s.dms || [];
   s.reports = s.reports || [];
@@ -185,6 +244,21 @@ function createCore(persistence) {
   const visibleChannels = (username) => state.channels.filter((c) => inConv(c, username));
   const myDms = (username) => state.dms.filter((d) => d.members.includes(username));
 
+  // Create (exactly once) the assistant DM that welcomes a user with the guide.
+  function ensureAssistantDm(username) {
+    if (!username || username === BOT) return null;
+    const id = dmIdFor(username, BOT);
+    if (getDm(id)) return null;
+    const dm = { id, type: 'dm', members: [username, BOT], createdAt: Date.now(), messages: [] };
+    dm.messages.push({
+      id: newId(), channel: id, username: BOT, color: BOT_COLOR,
+      ts: Date.now(), system: false, bot: true, text: BOT_GUIDE, reactions: {},
+    });
+    state.dms.push(dm);
+    save();
+    return dm;
+  }
+
   /* ------------------------------ protocol ------------------------------ */
 
   function completeJoin(ws, username, authId, email, displayName, color) {
@@ -205,6 +279,9 @@ function createCore(persistence) {
     if (t) { clearTimeout(t); offlineTimers.delete(username); }
     const isNewlyOnline = !declared.has(username);
     declared.add(username);
+
+    // The built-in assistant greets every user with a guide DM (created once).
+    ensureAssistantDm(username);
 
     send(ws, {
       type: 'init',
@@ -280,6 +357,20 @@ function createCore(persistence) {
         }
         save();
         broadcastConv(conv, { type: 'message', message: m });
+
+        // Assistant auto-reply: any DM with GhostBot gets a guided answer.
+        if (conv.type === 'dm' && conv.members.includes(BOT) && me.username !== BOT) {
+          const reply = {
+            id: newId(), channel: conv.id, username: BOT, color: BOT_COLOR,
+            ts: Date.now() + 1, system: false, bot: true, text: botReply(text), reactions: {},
+          };
+          conv.messages.push(reply);
+          if (conv.messages.length > MAX_MESSAGES_PER_CHANNEL) {
+            conv.messages.splice(0, conv.messages.length - MAX_MESSAGES_PER_CHANNEL);
+          }
+          save();
+          broadcastConv(conv, { type: 'message', message: reply });
+        }
         break;
       }
 
@@ -365,6 +456,7 @@ function createCore(persistence) {
         if (!isChannelAdmin(conv, me.username)) { send(ws, { type: 'error', message: 'Only group admins can add members.' }); return; }
         const target = String(msg.username || '').toLowerCase().trim();
         if (!state.users[target]) { send(ws, { type: 'error', message: `No user @${target}.` }); return; }
+        if (state.users[target].bot) { send(ws, { type: 'error', message: 'The assistant can’t be added to a group.' }); return; }
         if (conv.members.includes(target)) { send(ws, { type: 'error', message: `@${target} is already a member.` }); return; }
         conv.members.push(target);
         const sys = sysMessage(conv.id, `${me.username} added @${target}`);

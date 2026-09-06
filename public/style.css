@@ -778,6 +778,14 @@ body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
 .add-member-wrap { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 12px; }
 .add-member-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin-bottom: 8px; }
 .add-tag { margin-left: auto; color: var(--accent); font-weight: 700; font-size: 13px; flex-shrink: 0; }
+
+/* assistant (GhostBot) badge */
+.bot-badge {
+  display: inline-block; margin-left: 6px; vertical-align: middle;
+  font-size: 10px; font-weight: 700; letter-spacing: .02em;
+  color: #c4b5fd; background: rgba(139, 92, 246, .16);
+  border: 1px solid rgba(139, 92, 246, .4); border-radius: 6px; padding: 1px 6px;
+}
 #report-reason {
   width: 100%; background: var(--bg);
   border: 1px solid var(--border); color: var(--text);

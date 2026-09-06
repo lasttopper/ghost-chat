@@ -468,6 +468,11 @@ function renderSidebar() {
     const name = document.createElement('span');
     name.className = 'name';
     name.textContent = '@' + partner;
+    if (S.users[partner] && S.users[partner].bot) {
+      const bb = document.createElement('span');
+      bb.className = 'bot-badge'; bb.textContent = '🤖'; bb.title = 'Assistant';
+      name.appendChild(bb);
+    }
     btn.append(av, name);
     if (n > 0) btn.appendChild(makeBadge(n));
     btn.onclick = () => switchConv(dm.id);
@@ -503,7 +508,7 @@ function renderSidebar() {
   /* People — online first; offline collapsed behind a toggle */
   const team = $('#team-list');
   team.innerHTML = '';
-  const allNames = Object.keys(S.users);
+  const allNames = Object.keys(S.users).filter((u) => !(S.users[u] && S.users[u].bot));
   const peopleOnline = $('#people-online');
   if (peopleOnline) peopleOnline.textContent = `${S.online.size} online`;
   const onlineNamesList = allNames.filter((n) => S.online.has(n)).sort((a, b) => a.localeCompare(b));
@@ -634,7 +639,13 @@ function buildMsg(m, grouped, fresh) {
     const time = document.createElement('span');
     time.className = 'time';
     time.textContent = fmtTime(m.ts);
-    head.append(author, time);
+    if (m.bot) {
+      const bb = document.createElement('span');
+      bb.className = 'bot-badge'; bb.textContent = '🤖 assistant'; bb.title = 'Built-in assistant';
+      head.append(author, bb, time);
+    } else {
+      head.append(author, time);
+    }
     body.appendChild(head);
   }
   const text = document.createElement('div');
@@ -879,7 +890,7 @@ function openDmModal() {
     const q = search.value.trim().toLowerCase().replace(/^@/, '');
     list.innerHTML = '';
     const names = Object.keys(S.users)
-      .filter((u) => u !== S.me.username)
+      .filter((u) => u !== S.me.username && !(S.users[u] && S.users[u].bot))
       .filter((u) => !q || u.includes(q))
       .sort((a, b) => (S.online.has(b) - S.online.has(a)) || a.localeCompare(b)); // online first
     if (!names.length) {
@@ -994,7 +1005,7 @@ function drawMembers() {
       const q = search.value.trim().toLowerCase().replace(/^@/, '');
       results.innerHTML = '';
       const candidates = Object.keys(S.users)
-        .filter((u) => !conv.members.includes(u))
+        .filter((u) => !conv.members.includes(u) && !(S.users[u] && S.users[u].bot))
         .filter((u) => !q || u.includes(q))
         .sort((a, b) => (S.online.has(b) - S.online.has(a)) || a.localeCompare(b))
         .slice(0, 40);
