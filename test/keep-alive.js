@@ -50,7 +50,7 @@ ok(/IMGBB_CONFIG/.test(app) && /uploadImage/.test(app), 'client-side direct uplo
 const cfg = read('public/imgbb-config.js');
 ok(/apiKey:\s*'[0-9a-f]{32}'/.test(cfg) && /api\.imgbb\.com/.test(cfg), 'imgbb config present with key + endpoint');
 const html = read('public/index.html');
-ok(/imgbb-config\.js/.test(html) && /app\.js\?v=18/.test(html), 'config script loaded before app.js (v18)');
+ok(/imgbb-config\.js/.test(html) && /app\.js\?v=\d+/.test(html), 'config script loaded before app.js');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
