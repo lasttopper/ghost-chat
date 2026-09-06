@@ -70,8 +70,8 @@ function makeDom(port, bridgeState, preEval) {
     getFirebaseUser: () => (bridgeState.user ? JSON.stringify(bridgeState.user) : ''),
     requestFirebaseIdToken: () => { setTimeout(() => bridgeState.dom.window.__ghostIdToken(VALID_TOKEN), 5); },
     googleSignIn: () => {
-      setTimeout(() => bridgeState.dom.window.__ghostGoogleAuth(
-        { ok: true, uid: 'g-uid', email: 'g@test.local', displayName: 'G User' }), 5);
+      const result = bridgeState.authResult || { ok: true, uid: 'g-uid', email: 'g@test.local', displayName: 'G User' };
+      setTimeout(() => bridgeState.dom.window.__ghostGoogleAuth(result), 5);
     },
     googleSignOut: () => { bridgeState.session = false; },
   };
@@ -134,6 +134,41 @@ function closeDom(dom, st) {
     ok('sign-out calls through to the native side (session cleared)');
     closeDom(dom, st);
   } catch (e) { bad('native session resume/sign-out', e); }
+
+  /* ---- 4. a cancelled picker stays silent ---- */
+  try {
+    const st = {
+      session: false, user: null,
+      authResult: { ok: false, errorType: 'androidx.credentials.exceptions.GetCredentialCancellationException', error: 'No credential selected' },
+    };
+    const dom = makeDom(port, st);
+    const { window } = dom;
+    const $ = (s) => window.document.querySelector(s);
+    await waitFor(() => typeof $('#auth-google').onclick === 'function');
+    $('#auth-google').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await new Promise((r) => setTimeout(r, 700)); // let the mock resolve
+    assert($('#auth-error').classList.contains('hidden'), 'no error shown for a user cancel');
+    assert($('#username-setup').classList.contains('hidden'), 'stays on the login screen');
+    ok('a cancelled account picker is silent (no scary error)');
+    closeDom(dom, st);
+  } catch (e) { bad('cancel is silent', e); }
+
+  /* ---- 5. a real failure (e.g. SHA-1 not registered) is surfaced ---- */
+  try {
+    const st = {
+      session: false, user: null,
+      authResult: { ok: false, errorType: 'androidx.credentials.exceptions.NoCredentialException', error: 'No credential is found. Either no credentials available for the request, or the user canceled the request.' },
+    };
+    const dom = makeDom(port, st);
+    const { window } = dom;
+    const $ = (s) => window.document.querySelector(s);
+    await waitFor(() => typeof $('#auth-google').onclick === 'function');
+    $('#auth-google').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
+    await waitFor(() => !$('#auth-error').classList.contains('hidden'));
+    assert(/No credential is found/i.test($('#auth-error').textContent), 'the real error text is shown, got: ' + $('#auth-error').textContent);
+    ok('a real sign-in failure is displayed (diagnosable, never silent)');
+    closeDom(dom, st);
+  } catch (e) { bad('real error is surfaced', e); }
 
   wss.close();
   console.log(`\n${pass} passed, ${fail} failed`);

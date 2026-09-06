@@ -232,8 +232,10 @@ async function nativeGoogleSignIn() {
       authId: res.uid, mode: 'firebase', email: res.email || '', displayName: res.displayName || '',
     }));
     afterAuth();
-  } else if (!/cancel|no credential/i.test(String(res.error || ''))) {
-    // a cancelled account picker is not an error worth shouting about
+  } else if (!/cancellation/i.test(String(res.errorType || ''))) {
+    // Only a real user-cancel is silent. Everything else (e.g.
+    // NoCredentialException when the app's SHA-1 isn't registered yet) must
+    // stay visible — a button that "does nothing" is impossible to diagnose.
     const el = $('#auth-error');
     el.textContent = res.error || 'Google sign-in failed.';
     el.classList.remove('hidden');

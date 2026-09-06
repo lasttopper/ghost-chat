@@ -387,11 +387,13 @@ public class MainActivity extends Activity {
                                 @Override
                                 public void onError(GetCredentialException e) {
                                     String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
-                                    notifyGoogleAuth(null, msg);
+                                    String type = "";
+                                    try { type = e.getType() == null ? "" : e.getType(); } catch (Throwable ignored) {}
+                                    notifyGoogleAuth(null, msg, type);
                                 }
                             });
                 } catch (Throwable t) {
-                    notifyGoogleAuth(null, t.getMessage() != null ? t.getMessage() : "sign-in failed");
+                    notifyGoogleAuth(null, t.getMessage() != null ? t.getMessage() : "sign-in failed", "");
                 }
             });
         }
@@ -413,21 +415,21 @@ public class MainActivity extends Activity {
                 AuthCredential ac = GoogleAuthProvider.getCredential(g.getIdToken(), null);
                 FirebaseAuth.getInstance().signInWithCredential(ac).addOnCompleteListener(task -> {
                     if (task.isSuccessful() && task.getResult() != null) {
-                        notifyGoogleAuth(task.getResult().getUser(), null);
+                        notifyGoogleAuth(task.getResult().getUser(), null, "");
                     } else {
                         Exception ex = task.getException();
-                        notifyGoogleAuth(null, ex != null && ex.getMessage() != null ? ex.getMessage() : "firebase sign-in failed");
+                        notifyGoogleAuth(null, ex != null && ex.getMessage() != null ? ex.getMessage() : "firebase sign-in failed", "");
                     }
                 });
             } else {
-                notifyGoogleAuth(null, "unsupported credential type");
+                notifyGoogleAuth(null, "unsupported credential type", "");
             }
         } catch (Throwable t) {
-            notifyGoogleAuth(null, t.getMessage() != null ? t.getMessage() : "credential parse failed");
+            notifyGoogleAuth(null, t.getMessage() != null ? t.getMessage() : "credential parse failed", "");
         }
     }
 
-    private void notifyGoogleAuth(FirebaseUser user, String error) {
+    private void notifyGoogleAuth(FirebaseUser user, String error, String errorType) {
         JSONObject o = new JSONObject();
         try {
             if (user != null) {
@@ -438,6 +440,7 @@ public class MainActivity extends Activity {
             } else {
                 o.put("ok", false);
                 o.put("error", error == null ? "sign-in failed" : error);
+                o.put("errorType", errorType == null ? "" : errorType);
             }
         } catch (Throwable ignored) {}
         final String json = o.toString(); // valid JSON => safe JS literal
