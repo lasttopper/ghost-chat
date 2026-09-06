@@ -28,6 +28,16 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Verified App Links: invite links (https://ghost-chat-5gxc.onrender.com/?join=CODE)
+                 open in the app when it's installed. /.well-known/assetlinks.json on that host
+                 carries this app's signing-cert SHA-256, so Android auto-verifies at install. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="ghost-chat-5gxc.onrender.com" />
+            </intent-filter>
         </activity>
     </application>
 </manifest>

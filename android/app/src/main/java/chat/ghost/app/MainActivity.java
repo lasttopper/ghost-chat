@@ -110,7 +110,28 @@ public class MainActivity extends Activity {
         createNotificationChannel();
         requestRuntimePermissions();
 
-        webView.loadUrl(START_URL);
+        // Deep link (verified App Link, e.g. an invite link ?join=CODE): open
+        // exactly that URL; otherwise load the app home.
+        String deep = urlFromIntent(getIntent());
+        webView.loadUrl(deep != null ? deep : START_URL);
+    }
+
+    /** The app-host URL from a VIEW intent (deep link), or null. */
+    private String urlFromIntent(Intent intent) {
+        if (intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
+            Uri data = intent.getData();
+            if (data != null && APP_HOST.equals(data.getHost())) return data.toString();
+        }
+        return null;
+    }
+
+    /** A deep link tapped while the app is already open (launchMode singleTop). */
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        String deep = urlFromIntent(intent);
+        if (deep != null && webView != null) webView.loadUrl(deep);
     }
 
     /* ------------------------------- permissions ------------------------------- */
