@@ -28,6 +28,26 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import androidx.credentials.Credential;
+import androidx.credentials.CredentialManager;
+import androidx.credentials.CredentialManagerCallback;
+import androidx.credentials.CustomCredential;
+import androidx.credentials.GetCredentialRequest;
+import androidx.credentials.GetCredentialResponse;
+import androidx.credentials.exceptions.GetCredentialException;
+
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption;
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential;
+import com.google.firebase.auth.AuthCredential;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseUser;
+import com.google.firebase.auth.GoogleAuthProvider;
+
+import org.json.JSONObject;
+
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+
 /**
  * Ghost Chat - native Android wrapper.
  *
@@ -46,12 +66,18 @@ public class MainActivity extends Activity {
     private static final String CHANNEL_ID = "ghost_chat_messages";
     private static final int REQ_IMAGES = 1001;
     private static final int REQ_NOTIF = 1002;
+    // Web OAuth client of the Firebase project (google-services.json, type 3).
+    // Google ID tokens are requested for this audience so Firebase Auth (web
+    // and native) end up as the SAME account.
+    private static final String WEB_CLIENT_ID =
+            "67898464798-kphnop5mq9rfsohagrsh1ci6m3vce0t5.apps.googleusercontent.com";
 
     private WebView webView;
     private ScreenshotObserver screenshotObserver;
     private volatile boolean resumed = false;
     private long lastScreenshotAt = 0L;
     private final Handler main = new Handler(Looper.getMainLooper());
+    private final ExecutorService authExecutor = Executors.newSingleThreadExecutor();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -276,6 +302,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        authExecutor.shutdownNow();
         if (webView != null) { webView.destroy(); webView = null; }
         super.onDestroy();
     }
@@ -287,12 +314,145 @@ public class MainActivity extends Activity {
         public boolean isNative() { return true; }
 
         @JavascriptInterface
-        public String getAppVersion() { return "2.0.0"; }
+        public String getAppVersion() { return "2.2.0"; }
 
         /** Called by the page instead of the Web Notification API while in the APK. */
         @JavascriptInterface
         public void showNotification(String title, String body, String tag) {
             showNativeNotification(title, body, tag);
         }
+
+        /* ---------------- native Google sign-in (Firebase session) ----------------
+         * Google blocks its OAuth inside embedded WebViews, so the app signs in
+         * natively (Credential Manager -> Firebase Auth) and serves the page
+         * real Firebase ID tokens through this bridge. Same uid/email as a web
+         * Google login => one account across web and app. */
+
+        @JavascriptInterface
+        public boolean hasFirebaseSession() {
+            try { return FirebaseAuth.getInstance().getCurrentUser() != null; } catch (Throwable t) { return false; }
+        }
+
+        /** JSON {uid,email,displayName} for the native session, or "" if none. */
+        @JavascriptInterface
+        public String getFirebaseUser() {
+            try {
+                FirebaseUser u = FirebaseAuth.getInstance().getCurrentUser();
+                if (u == null) return "";
+                JSONObject o = new JSONObject();
+                o.put("uid", String.valueOf(u.getUid()));
+                o.put("email", u.getEmail() == null ? "" : u.getEmail());
+                o.put("displayName", u.getDisplayName() == null ? "" : u.getDisplayName());
+                return o.toString();
+            } catch (Throwable t) { return ""; }
+        }
+
+        /** Async: native fetches a fresh ID token, then calls window.__ghostIdToken(tok). */
+        @JavascriptInterface
+        public void requestFirebaseIdToken() {
+            final FirebaseUser u;
+            try { u = FirebaseAuth.getInstance().getCurrentUser(); } catch (Throwable t) { u = null; }
+            if (u == null) { evalGhostIdToken(""); return; }
+            u.getIdToken(false).addOnCompleteListener(task -> {
+                String tok = "";
+                try {
+                    if (task.isSuccessful() && task.getResult() != null && task.getResult().getToken() != null) {
+                        tok = task.getResult().getToken();
+                    }
+                } catch (Throwable ignored) {}
+                evalGhostIdToken(tok);
+            });
+        }
+
+        /** Starts the Google account picker; result -> window.__ghostGoogleAuth(json). */
+        @JavascriptInterface
+        public void googleSignIn() {
+            runOnUiThread(() -> {
+                try {
+                    GetGoogleIdOption option = new GetGoogleIdOption.Builder()
+                            .setServerClientId(WEB_CLIENT_ID)
+                            .setFilterByAuthorizedAccounts(false)
+                            .build();
+                    GetCredentialRequest req = new GetCredentialRequest.Builder()
+                            .addCredentialOption(option)
+                            .build();
+                    CredentialManager cm = CredentialManager.create(MainActivity.this);
+                    cm.getCredentialAsync(MainActivity.this, req, null, authExecutor,
+                            new CredentialManagerCallback<GetCredentialResponse, GetCredentialException>() {
+                                @Override
+                                public void onResult(GetCredentialResponse response) {
+                                    handleGoogleCredential(response);
+                                }
+                                @Override
+                                public void onError(GetCredentialException e) {
+                                    String msg = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
+                                    notifyGoogleAuth(null, msg);
+                                }
+                            });
+                } catch (Throwable t) {
+                    notifyGoogleAuth(null, t.getMessage() != null ? t.getMessage() : "sign-in failed");
+                }
+            });
+        }
+
+        @JavascriptInterface
+        public void googleSignOut() {
+            try { FirebaseAuth.getInstance().signOut(); } catch (Throwable ignored) {}
+        }
+    }
+
+    /* --------------------- Google sign-in helpers (native side) --------------------- */
+
+    private void handleGoogleCredential(GetCredentialResponse response) {
+        try {
+            Credential cred = response.getCredential();
+            if (cred instanceof CustomCredential
+                    && GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL.equals(cred.getType())) {
+                GoogleIdTokenCredential g = GoogleIdTokenCredential.createFrom(cred.getData());
+                AuthCredential ac = GoogleAuthProvider.getCredential(g.getIdToken(), null);
+                FirebaseAuth.getInstance().signInWithCredential(ac).addOnCompleteListener(task -> {
+                    if (task.isSuccessful() && task.getResult() != null) {
+                        notifyGoogleAuth(task.getResult().getUser(), null);
+                    } else {
+                        Exception ex = task.getException();
+                        notifyGoogleAuth(null, ex != null && ex.getMessage() != null ? ex.getMessage() : "firebase sign-in failed");
+                    }
+                });
+            } else {
+                notifyGoogleAuth(null, "unsupported credential type");
+            }
+        } catch (Throwable t) {
+            notifyGoogleAuth(null, t.getMessage() != null ? t.getMessage() : "credential parse failed");
+        }
+    }
+
+    private void notifyGoogleAuth(FirebaseUser user, String error) {
+        JSONObject o = new JSONObject();
+        try {
+            if (user != null) {
+                o.put("ok", true);
+                o.put("uid", String.valueOf(user.getUid()));
+                o.put("email", user.getEmail() == null ? "" : user.getEmail());
+                o.put("displayName", user.getDisplayName() == null ? "" : user.getDisplayName());
+            } else {
+                o.put("ok", false);
+                o.put("error", error == null ? "sign-in failed" : error);
+            }
+        } catch (Throwable ignored) {}
+        final String json = o.toString(); // valid JSON => safe JS literal
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            try { webView.evaluateJavascript("window.__ghostGoogleAuth && window.__ghostGoogleAuth(" + json + ");", null); } catch (Throwable ignored) {}
+        });
+    }
+
+    private void evalGhostIdToken(String token) {
+        // Firebase ID tokens are JWTs (base64url + dots); strip anything else
+        // defensively so the value can never break out of the JS string.
+        String safe = token == null ? "" : token.replaceAll("[^A-Za-z0-9._-]", "");
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            try { webView.evaluateJavascript("window.__ghostIdToken && window.__ghostIdToken('" + safe + "');", null); } catch (Throwable ignored) {}
+        });
     }
 }

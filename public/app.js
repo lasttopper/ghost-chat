@@ -182,6 +182,64 @@ function notifyMessage(m) {
   } catch {}
 }
 
+/* --------------------- native Android bridge (WebView APK) ---------------------
+ * Inside the APK, window.AndroidBridge is injected by the native shell. Google
+ * OAuth is blocked in embedded WebViews, so Google sign-in happens NATIVELY
+ * (Credential Manager + Firebase Auth) and the bridge serves the page real
+ * Firebase ID tokens (the native side handles refresh). Same uid/email as a
+ * web Google login => one account across web and app. Email/password + guest
+ * flows are untouched (they work fine inside a WebView). */
+
+const isNativeApp = () => {
+  try { return !!(window.AndroidBridge && window.AndroidBridge.isNative && window.AndroidBridge.isNative()); } catch { return false; }
+};
+let nativeAuth = false; // current session is held by the native app
+
+let bridgeTokenResolve = null;
+window.__ghostIdToken = (tok) => {
+  const r = bridgeTokenResolve; bridgeTokenResolve = null;
+  if (r) r(tok || '');
+};
+function getBridgeIdToken(timeoutMs = 8000) {
+  return new Promise((resolve) => {
+    bridgeTokenResolve = resolve;
+    try { window.AndroidBridge.requestFirebaseIdToken(); }
+    catch { bridgeTokenResolve = null; resolve(''); return; }
+    setTimeout(() => { if (bridgeTokenResolve === resolve) { bridgeTokenResolve = null; resolve(''); } }, timeoutMs);
+  });
+}
+
+let googleAuthResolve = null;
+window.__ghostGoogleAuth = (res) => {
+  const r = googleAuthResolve; googleAuthResolve = null;
+  if (r) r(res && typeof res === 'object' ? res : { ok: false, error: 'sign-in failed' });
+};
+async function nativeGoogleSignIn() {
+  const res = await new Promise((resolve) => {
+    googleAuthResolve = resolve;
+    try { window.AndroidBridge.googleSignIn(); }
+    catch { googleAuthResolve = null; resolve({ ok: false, error: 'Google sign-in is unavailable.' }); return; }
+    setTimeout(() => { if (googleAuthResolve === resolve) { googleAuthResolve = null; resolve({ ok: false, error: 'Google sign-in timed out.' }); } }, 180000);
+  });
+  if (res.ok && res.uid) {
+    nativeAuth = true;
+    S.me = {
+      authId: res.uid, email: res.email || '', displayName: res.displayName || '',
+      mode: 'firebase', username: null,
+      color: ls.get('ghost.colorFor.' + res.uid) || pickedColor,
+    };
+    ls.set('ghost.session', JSON.stringify({
+      authId: res.uid, mode: 'firebase', email: res.email || '', displayName: res.displayName || '',
+    }));
+    afterAuth();
+  } else if (!/cancel|no credential/i.test(String(res.error || ''))) {
+    // a cancelled account picker is not an error worth shouting about
+    const el = $('#auth-error');
+    el.textContent = res.error || 'Google sign-in failed.';
+    el.classList.remove('hidden');
+  }
+}
+
 /* ------------------------------ firebase ------------------------------ */
 
 // On sandbox preview hosts (PORT-sandboxid.domain) point at the emulator's
@@ -258,7 +316,9 @@ function connect() {
     // Guests have no token and join unverified (never the owner).
     let idToken = '';
     try {
-      if (S.fb && S.fb.authMod) {
+      if (nativeAuth && window.AndroidBridge) {
+        idToken = await getBridgeIdToken(); // native app holds the session
+      } else if (S.fb && S.fb.authMod) {
         const u = S.fb.authMod.currentUser(S.fb.auth);
         if (u) idToken = await S.fb.authMod.getIdToken(u);
       }
@@ -1511,6 +1571,7 @@ function renderMe() {
   out.title = 'Sign out';
   out.textContent = '⏻';
   out.onclick = async () => {
+    if (nativeAuth) { try { window.AndroidBridge.googleSignOut(); } catch {} nativeAuth = false; }
     if (S.fb) { try { await S.fb.authMod.signOut(S.fb.auth); } catch {} }
     // keep the per-browser guest identity + colors so the name can be
     // recovered (server resolves the username from the authId); drop the rest
@@ -1595,6 +1656,7 @@ function wireFirebaseUi() {
   $('#auth-password').onkeydown = (e) => { if (e.key === 'Enter') submit.onclick(); };
 
   $('#auth-google').onclick = async () => {
+    if (isNativeApp()) { nativeGoogleSignIn(); return; } // APK: native flow
     if (S.fb.emulator) {
       const el = $('#auth-error');
       el.textContent = 'Google sign-in is not available in emulator mode — use email/password.';
@@ -1746,14 +1808,50 @@ async function boot() {
     afterAuth();
   };
 
+  /* Google button (early wiring): inside the APK the native flow handles it
+   * even before/without the Firebase JS SDK; wireFirebaseUi re-wires the same
+   * native branch plus the browser popup path once the SDK arrives. */
+  $('#auth-google').onclick = () => {
+    if (isNativeApp()) { nativeGoogleSignIn(); return; }
+    const el = $('#auth-error');
+    el.textContent = 'Sign-in is still loading — try again in a moment.';
+    el.classList.remove('hidden');
+  };
+
   /* Persistent login: a durable session marker is stamped every time the user
    * enters the app and cleared ONLY by the manual Sign-out button. If it is
    * present, resume straight into the chat - a refresh must never bounce the
    * user back to the login screen or make them wait for the Firebase SDK. */
   if (parseJoinCode()) $('#invite-banner').classList.remove('hidden');
   let resumed = false;
+
+  /* APK: a native Firebase session (Google sign-in) is the source of truth —
+   * resume straight into it so the server can VERIFY the identity on join
+   * (the bridge supplies the ID token in connect()). */
+  if (isNativeApp()) {
+    let hasNative = false;
+    try { hasNative = !!window.AndroidBridge.hasFirebaseSession(); } catch {}
+    if (hasNative) {
+      let nu = null;
+      try { nu = JSON.parse(window.AndroidBridge.getFirebaseUser() || 'null'); } catch {}
+      if (nu && nu.uid) {
+        nativeAuth = true;
+        S.me = {
+          authId: nu.uid, email: nu.email || '', displayName: nu.displayName || '',
+          mode: 'firebase', username: null,
+          color: ls.get('ghost.colorFor.' + nu.uid) || pickedColor,
+        };
+        ls.set('ghost.session', JSON.stringify({
+          authId: nu.uid, mode: 'firebase', email: nu.email || '', displayName: nu.displayName || '',
+        }));
+        resumed = true;
+        afterAuth();
+      }
+    }
+  }
+
   const sessionRaw = ls.get('ghost.session');
-  if (sessionRaw) {
+  if (!resumed && sessionRaw) {
     let sess = null;
     try { sess = JSON.parse(sessionRaw); } catch {}
     if (sess && sess.authId) {

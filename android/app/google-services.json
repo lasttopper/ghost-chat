@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "67898464798",
+    "firebase_url": "https://ghost-7ed67-default-rtdb.firebaseio.com",
+    "project_id": "ghost-7ed67",
+    "storage_bucket": "ghost-7ed67.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:67898464798:android:0954078b064c22d0ee6c0f",
+        "android_client_info": {
+          "package_name": "chat.ghost.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "67898464798-kphnop5mq9rfsohagrsh1ci6m3vce0t5.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAjzf1MJfxkycciQxop812O21DV0QKPBhY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "67898464798-kphnop5mq9rfsohagrsh1ci6m3vce0t5.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

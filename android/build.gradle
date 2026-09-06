@@ -1,6 +1,6 @@
 // Root build file. The Android Gradle Plugin version is pinned here; the app
-// module applies it. No AndroidX / no external libraries are used, so the
-// build only needs the Android SDK (no dependency resolution surprises).
+// module applies it. Google services plugin reads app/google-services.json.
 plugins {
     id 'com.android.application' version '8.2.2' apply false
+    id 'com.google.gms.google-services' version '4.4.2' apply false
 }
