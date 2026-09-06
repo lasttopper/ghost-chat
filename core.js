@@ -157,6 +157,11 @@ function createCore(persistence, options = {}) {
   const declared = new Set();
   const offlineTimers = new Map();
   const screenshotThrottle = new Map(); // "user:conv" -> ts (anti-spam for screenshot notices)
+  // FCM push: username -> Map(fcmToken -> lastSeen). Populated by the Android
+  // app over WS ('push_register'); survives the socket closing so offline
+  // users still receive messages as system notifications.
+  const push = options.push || null;
+  const pushTokens = new Map();
   let saveTimer = null;
 
   const ready = (async () => {
@@ -233,6 +238,32 @@ function createCore(persistence, options = {}) {
       if (inConv(conv, c.username)) { try { ws.send(data); } catch {} }
     }
   };
+
+  /* Push a real (non-system) message to members with NO live socket, via FCM.
+   * The Android app registers device tokens over WS; delivery works even when
+   * the app process was frozen or killed. Users currently connected get the
+   * message over the socket (and its own in-app notification), never a push. */
+  function pushForMessage(conv, m) {
+    if (!push || !push.enabled || !m || m.system) return;
+    const title = conv.type === 'dm'
+      ? `@${m.username}`
+      : `${conv.private ? '\u{1F512} ' : '#'}${conv.name} \u2014 @${m.username}`;
+    const body = (m.text || '').length > 110 ? m.text.slice(0, 110) + '\u2026' : (m.text || '');
+    // Same visibility rule as the socket broadcast: DMs/private groups have an
+    // explicit member list; public channels are for everyone (convMembers null).
+    const targets = convMembers(conv)
+      || Object.keys(state.users).filter((u) => !(state.users[u] && state.users[u].bot));
+    for (const member of targets) {
+      if (member === m.username || hasSocket(member)) continue;
+      const set = pushTokens.get(member);
+      if (!set || !set.size) continue;
+      for (const tok of [...set.keys()]) {
+        push.sendTo(tok, { title, body, data: { conv: conv.id } })
+          .then((r) => { if (r === 'invalid') set.delete(tok); }) // dead token
+          .catch(() => {});
+      }
+    }
+  }
 
   const onlineNames = () => {
     const s = new Set(declared);
@@ -399,6 +430,7 @@ function createCore(persistence, options = {}) {
         }
         save();
         broadcastConv(conv, { type: 'message', message: m });
+        pushForMessage(conv, m);
 
         // Assistant auto-reply: any DM with GhostBot gets a guided answer.
         if (conv.type === 'dm' && conv.members.includes(BOT) && me.username !== BOT) {
@@ -412,7 +444,31 @@ function createCore(persistence, options = {}) {
           }
           save();
           broadcastConv(conv, { type: 'message', message: reply });
+          pushForMessage(conv, reply);
         }
+        break;
+      }
+      case 'push_register': {
+        // Android app handing us its FCM device token (survives its socket).
+        if (!me) return;
+        const tok = String(msg.token || '');
+        if (tok.length < 20 || tok.length > 4096 || !/^[A-Za-z0-9._~%:-]+$/.test(tok)) return;
+        let set = pushTokens.get(me.username);
+        if (!set) { set = new Map(); pushTokens.set(me.username, set); }
+        set.set(tok, Date.now());
+        while (set.size > 10) { // bounded: evict the least-recently-seen device
+          let oldest = null, oldestTs = Infinity;
+          for (const [t, ts] of set) if (ts < oldestTs) { oldest = t; oldestTs = ts; }
+          set.delete(oldest);
+        }
+        break;
+      }
+      case 'push_unregister': {
+        if (!me) return;
+        const set = pushTokens.get(me.username);
+        if (!set) break;
+        const tok = String(msg.token || '');
+        if (tok) set.delete(tok); else set.clear(); // sign-out clears all devices
         break;
       }
 

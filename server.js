@@ -40,7 +40,18 @@ const persistence = {
   saveSync(state) { fs.writeFileSync(DATA_FILE, JSON.stringify(state)); },
 };
 
-const core = createCore(persistence);
+/* FCM push for offline Android users. Enabled only when the Firebase
+ * service-account JSON is provided (Render env FIREBASE_SERVICE_ACCOUNT).
+ * Without it the server runs exactly as before — no push, no errors. */
+const { createPush } = require('./push');
+const push = createPush({
+  serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT || '',
+  projectId: process.env.FIREBASE_PROJECT_ID || undefined,
+});
+if (push.enabled) console.log('FCM push enabled for project', push.projectId);
+else console.log('FCM push disabled (set FIREBASE_SERVICE_ACCOUNT to enable)');
+
+const core = createCore(persistence, { push });
 
 /* --------------------------- http static server --------------------------- */
 

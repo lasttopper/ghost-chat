@@ -240,6 +240,14 @@ window.__ghostGoogleAuth = (res) => {
   const r = googleAuthResolve; googleAuthResolve = null;
   if (r) r(res && typeof res === 'object' ? res : { ok: false, error: 'sign-in failed' });
 };
+
+/* FCM push (APK): the native shell fetches the device token and calls this.
+ * Registering it with the server means messages sent while the app is frozen
+ * or killed still arrive as system notifications (data-only FCM messages). */
+window.__ghostFcmToken = (tok) => {
+  if (!tok) return;
+  if (send({ type: 'push_register', token: tok })) ls.set('ghost.fcmToken', tok);
+};
 async function nativeGoogleSignIn() {
   const res = await new Promise((resolve) => {
     googleAuthResolve = resolve;
@@ -357,6 +365,11 @@ function connect() {
       email: S.me.email, displayName: S.me.displayName, color: S.me.color,
       idToken,
     });
+    // APK: (re-)register the FCM device token so this device keeps receiving
+    // push while offline; the native side answers via window.__ghostFcmToken.
+    if (isNativeApp() && window.AndroidBridge.requestFcmToken) {
+      try { window.AndroidBridge.requestFcmToken(); } catch {}
+    }
   };
   S.ws.onmessage = (ev) => {
     let msg; try { msg = JSON.parse(ev.data); } catch { return; }
@@ -1599,6 +1612,8 @@ function renderMe() {
   out.title = 'Sign out';
   out.textContent = '⏻';
   out.onclick = async () => {
+    // Stop pushes for this device before the session goes away.
+    if (isNativeApp()) { try { send({ type: 'push_unregister' }); } catch {} }
     if (nativeAuth) { try { window.AndroidBridge.googleSignOut(); } catch {} nativeAuth = false; }
     if (S.fb) { try { await S.fb.authMod.signOut(S.fb.auth); } catch {} }
     // keep the per-browser guest identity + colors so the name can be

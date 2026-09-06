@@ -2,10 +2,6 @@ package chat.ghost.app;
 
 import android.Manifest;
 import android.app.Activity;
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
-import android.app.PendingIntent;
 import android.content.ContentResolver;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -42,6 +38,7 @@ import com.google.firebase.auth.AuthCredential;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.auth.GoogleAuthProvider;
+import com.google.firebase.messaging.FirebaseMessaging;
 
 import org.json.JSONObject;
 
@@ -63,7 +60,6 @@ public class MainActivity extends Activity {
 
     private static final String START_URL = "https://ghost-chat-5gxc.onrender.com/";
     private static final String APP_HOST = "ghost-chat-5gxc.onrender.com";
-    private static final String CHANNEL_ID = "ghost_chat_messages";
     private static final int REQ_IMAGES = 1001;
     private static final int REQ_NOTIF = 1002;
     // Web OAuth client of the Firebase project (google-services.json, type 3).
@@ -71,6 +67,9 @@ public class MainActivity extends Activity {
     // and native) end up as the SAME account.
     private static final String WEB_CLIENT_ID =
             "67898464798-kphnop5mq9rfsohagrsh1ci6m3vce0t5.apps.googleusercontent.com";
+
+    // Live instance so PushService can forward FCM token refreshes to the page.
+    private static volatile MainActivity instance;
 
     private WebView webView;
     private ScreenshotObserver screenshotObserver;
@@ -133,7 +132,8 @@ public class MainActivity extends Activity {
         });
         webView.setWebChromeClient(new WebChromeClient());
 
-        createNotificationChannel();
+        instance = this;
+        Notifications.ensureChannel(this);
         requestRuntimePermissions();
 
         // Deep link (verified App Link, e.g. an invite link ?join=CODE): open
@@ -256,42 +256,13 @@ public class MainActivity extends Activity {
 
     /* ------------------------------ notifications ------------------------------ */
 
-    private void createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null && nm.getNotificationChannel(CHANNEL_ID) == null) {
-                NotificationChannel ch = new NotificationChannel(
-                        CHANNEL_ID, "Messages", NotificationManager.IMPORTANCE_HIGH);
-                ch.setDescription("Ghost Chat message notifications");
-                nm.createNotificationChannel(ch);
-            }
-        }
-    }
-
     private void showNativeNotification(String title, String body, String tag) {
         try {
             if (Build.VERSION.SDK_INT >= 33
                     && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 return;
             }
-            Intent open = new Intent(this, MainActivity.class);
-            open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-            int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
-            if (Build.VERSION.SDK_INT >= 23) piFlags |= PendingIntent.FLAG_IMMUTABLE;
-            int id = (tag != null && !tag.isEmpty()) ? tag.hashCode() : 1;
-            PendingIntent pi = PendingIntent.getActivity(this, id, open, piFlags);
-
-            Notification.Builder b = Build.VERSION.SDK_INT >= 26
-                    ? new Notification.Builder(this, CHANNEL_ID)
-                    : new Notification.Builder(this);
-            b.setContentTitle(title)
-                    .setContentText(body)
-                    .setSmallIcon(R.drawable.ic_launcher)
-                    .setContentIntent(pi)
-                    .setAutoCancel(true);
-
-            NotificationManager nm = getSystemService(NotificationManager.class);
-            if (nm != null) nm.notify(id, b.build());
+            Notifications.show(this, title, body, tag);
         } catch (Throwable ignored) {}
     }
 
@@ -308,6 +279,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (instance == this) instance = null;
         authExecutor.shutdownNow();
         if (webView != null) { webView.destroy(); webView = null; }
         super.onDestroy();
@@ -428,6 +400,23 @@ public class MainActivity extends Activity {
             });
         }
 
+        /** Async: FCM device token -> window.__ghostFcmToken(tok) so the page
+         *  can register it with the server for offline push. */
+        @JavascriptInterface
+        public void requestFcmToken() {
+            try {
+                FirebaseMessaging.getInstance().getToken().addOnCompleteListener(task -> {
+                    String tok = "";
+                    try {
+                        if (task.isSuccessful() && task.getResult() != null) tok = task.getResult();
+                    } catch (Throwable ignored) {}
+                    evalFcmToken(tok);
+                });
+            } catch (Throwable t) {
+                evalFcmToken("");
+            }
+        }
+
         @JavascriptInterface
         public void googleSignOut() {
             try { FirebaseAuth.getInstance().signOut(); } catch (Throwable ignored) {}
@@ -477,6 +466,20 @@ public class MainActivity extends Activity {
         runOnUiThread(() -> {
             if (webView == null) return;
             try { webView.evaluateJavascript("window.__ghostGoogleAuth && window.__ghostGoogleAuth(" + json + ");", null); } catch (Throwable ignored) {}
+        });
+    }
+
+    /** Called by PushService when FCM rotates the device token. */
+    static void pushTokenRefreshed(String token) {
+        MainActivity a = instance;
+        if (a != null) a.evalFcmToken(token);
+    }
+
+    private void evalFcmToken(String token) {
+        String safe = token == null ? "" : token.replaceAll("[^A-Za-z0-9._~%:-]", "");
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            try { webView.evaluateJavascript("window.__ghostFcmToken && window.__ghostFcmToken('" + safe + "');", null); } catch (Throwable ignored) {}
         });
     }
 
