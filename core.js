@@ -156,6 +156,7 @@ function createCore(persistence, options = {}) {
   const clients = new Map();       // ws -> { username, color }
   const declared = new Set();
   const offlineTimers = new Map();
+  const screenshotThrottle = new Map(); // "user:conv" -> ts (anti-spam for screenshot notices)
   let saveTimer = null;
 
   const ready = (async () => {
@@ -449,6 +450,24 @@ function createCore(persistence, options = {}) {
         conv.messages.splice(idx, 1);
         save();
         broadcastConv(conv, { type: 'message_deleted', channelId: conv.id, messageId: m.id });
+        break;
+      }
+
+      case 'screenshot': {
+        // Best-effort: the client reports a screenshot signal (desktop keyboard
+        // shortcut). We can't truly detect OS screenshots from the web, so this
+        // is a good-faith notice, rate-limited to avoid spam.
+        if (!me) return;
+        const conv = findConv(msg.channel);
+        if (!conv || !inConv(conv, me.username)) return;
+        const now = Date.now();
+        const key = me.username + ':' + conv.id;
+        if (screenshotThrottle.has(key) && now - screenshotThrottle.get(key) < 10000) return;
+        screenshotThrottle.set(key, now);
+        const sys = sysMessage(conv.id, `\u{1F4F8} ${me.username} took a screenshot`);
+        conv.messages.push(sys);
+        save();
+        broadcastConv(conv, { type: 'message', message: sys });
         break;
       }
 

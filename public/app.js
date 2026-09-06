@@ -931,6 +931,32 @@ function renderTyping() {
 }
 setInterval(renderTyping, 1000);
 
+/* --------------------------- screenshot notice --------------------------- */
+
+/* Best-effort screenshot detection.
+ *
+ * IMPORTANT: browsers do NOT expose an OS screenshot event, so a web page can
+ * never truly know when a screenshot is taken (a native iOS/Android app can,
+ * but the web cannot). The only usable signal is the DESKTOP screenshot
+ * keyboard shortcut, which we report to the server; the server posts a notice
+ * in the current chat. This will NOT catch mobile screenshots, mouse-driven
+ * snipping tools, or OS shortcuts the browser never receives — it is a
+ * deterrent, not a guarantee. */
+let lastScreenshotAt = 0;
+function screenshotSignal(e) {
+  const k = e.key || '';
+  const isPrtScn = k === 'PrintScreen' || k.toLowerCase() === 'printscreen';
+  const isMacShot = e.metaKey && e.shiftKey && ['3', '4', '5'].includes(k); // macOS ⌘⇧3/4/5
+  if (!(isPrtScn || isMacShot)) return;
+  if (!S.active) return;
+  const now = Date.now();
+  if (now - lastScreenshotAt < 8000) return; // debounce held keys / spam
+  lastScreenshotAt = now;
+  if (send({ type: 'screenshot', channel: S.active })) {
+    toast('📸 Screenshot detected — the chat was notified.');
+  }
+}
+
 /* ------------------------------ emoji picker ------------------------------ */
 
 function buildPickerGrid(onPick) {
@@ -1620,6 +1646,8 @@ function wireMobileUx() {
 
 async function boot() {
   wireMobileUx();
+  // best-effort screenshot notices (desktop shortcut keys only — see notes above)
+  document.addEventListener('keydown', screenshotSignal);
 
   /* service worker: app-shell cache + notification plumbing (PWA/TWA) */
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
