@@ -1971,6 +1971,18 @@ function closeNav() { document.body.classList.remove('nav-open'); }
 function wireMobileUx() {
   $('#menu-btn').onclick = openNav;
   $('#nav-backdrop').onclick = closeNav;
+  // Drawer UX: selecting anything from the sidebar — a DM, a group, a person,
+  // or the new-DM / join / create buttons — hides the drawer so the chosen
+  // view or dialog is immediately visible. On desktop the sidebar is docked,
+  // so closeNav() there is a harmless no-op.
+  const sidebarEl = document.querySelector('.sidebar');
+  if (sidebarEl) {
+    sidebarEl.addEventListener('click', (e) => {
+      if (e.target.closest('#dm-list *, #channel-list *, #team-list *, #new-dm, #join-group, #add-channel')) {
+        closeNav();
+      }
+    });
+  }
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNav(); });
   window.addEventListener('resize', () => { if (window.innerWidth > 720) closeNav(); });
 
