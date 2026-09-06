@@ -317,6 +317,15 @@ function route(msg) {
     }
     case 'message': onMessage(msg.message); break;
     case 'reactions': onReactions(msg); break;
+    case 'message_deleted': {
+      const conv = getConv(msg.channelId);
+      if (conv) {
+        conv.messages = conv.messages.filter((m) => m.id !== msg.messageId);
+        if (msg.channelId === S.active) renderMessages();
+        renderSidebar();
+      }
+      break;
+    }
     case 'presence': onPresence(msg.online); break;
     case 'typing': onTyping(msg, false); break;
     case 'typing_stop': onTyping(msg, true); break;
@@ -325,11 +334,11 @@ function route(msg) {
       S.typing[msg.channel.id] = new Map();
       lastRead[msg.channel.id] = S.serverNow; saveLastRead();
       renderSidebar();
+      switchConv(msg.channel.id); // always open the group you just made
       if (msg.channel.private) {
-        switchConv(msg.channel.id);
         showInviteModal(inviteLink(msg.channel.inviteCode));
       } else {
-        toast(`New group #${msg.channel.name}`);
+        toast(`Created #${msg.channel.name}`);
       }
       break;
     }
@@ -441,7 +450,8 @@ function onReactions({ channelId, messageId, reactions }) {
 
 function onPresence(online) {
   S.online = new Set(online);
-  if (S.prevOnline) {
+  // Presence toasts are only pleasant in small groups; stay quiet when busy.
+  if (S.prevOnline && S.online.size <= 12 && S.prevOnline.size <= 12) {
     for (const u of S.online) if (!S.prevOnline.has(u) && u !== S.me.username) toast(`@${u} came online`);
     for (const u of S.prevOnline) if (!S.online.has(u) && u !== S.me.username) toast(`@${u} went offline`, 'leave');
   }
@@ -476,6 +486,15 @@ function makeBadge(n) {
   badge.className = 'badge';
   badge.textContent = n > 99 ? '99+' : String(n);
   return badge;
+}
+
+/* Show total unread in the browser tab / launcher title. */
+function updateTitle() {
+  let total = 0;
+  for (const conv of [...S.channels, ...S.dms]) {
+    if (conv.id !== S.active) total += unreadCount(conv);
+  }
+  try { document.title = total > 0 ? `(${total > 99 ? '99+' : total}) Ghost Chat` : 'Ghost Chat'; } catch {}
 }
 
 function renderSidebar() {
@@ -569,6 +588,7 @@ function renderSidebar() {
       for (const name of offlineNamesList) team.appendChild(makeRow(name, false));
     }
   }
+  updateTitle();
 }
 
 function renderHeader() {
@@ -635,6 +655,36 @@ function buildSystem(m) {
   return row;
 }
 
+/* Render message text safely as DOM: clickable http(s) links + highlighted
+ * @mentions. Never injects HTML from user content (textContent / href only). */
+function renderRichText(el, str) {
+  const re = /(https?:\/\/[^\s<]+)|(@[a-z0-9_]{3,20})/gi;
+  let last = 0, m;
+  while ((m = re.exec(str)) !== null) {
+    if (m.index > last) el.appendChild(document.createTextNode(str.slice(last, m.index)));
+    const tok = m[0];
+    if (tok.charAt(0).toLowerCase() === 'h') {
+      const a = document.createElement('a');
+      a.href = tok; a.target = '_blank'; a.rel = 'noopener noreferrer nofollow';
+      a.className = 'msg-link';
+      a.textContent = tok;
+      el.appendChild(a);
+    } else {
+      const uname = tok.slice(1).toLowerCase();
+      if (S.users[uname]) {
+        const span = document.createElement('span');
+        span.className = 'mention' + (uname === (S.me.username || '') ? ' mention-me' : '');
+        span.textContent = tok;
+        el.appendChild(span);
+      } else {
+        el.appendChild(document.createTextNode(tok)); // not a real user — leave as plain text
+      }
+    }
+    last = re.lastIndex;
+  }
+  if (last < str.length) el.appendChild(document.createTextNode(str.slice(last)));
+}
+
 function buildMsg(m, grouped, fresh) {
   const row = document.createElement('div');
   row.className = 'msg' + (grouped ? ' grouped' : '') + (fresh ? ' fresh' : '');
@@ -678,10 +728,12 @@ function buildMsg(m, grouped, fresh) {
   }
   const text = document.createElement('div');
   text.className = 'msg-text';
-  text.textContent = m.text;
+  renderRichText(text, m.text);
   body.appendChild(text);
   body.appendChild(buildReactions(m));
 
+  const conv = getConv(m.channel);
+  const canDelete = !m.system && (m.username === S.me.username || (conv && isChannelAdmin(conv)));
   const actions = document.createElement('div');
   actions.className = 'msg-actions';
   const rxBtn = document.createElement('button');
@@ -693,6 +745,17 @@ function buildMsg(m, grouped, fresh) {
   repBtn.title = 'Report message';
   repBtn.onclick = () => openReportModal(m);
   actions.append(rxBtn, repBtn);
+  if (canDelete) {
+    const delBtn = document.createElement('button');
+    delBtn.textContent = '🗑';
+    delBtn.title = 'Delete message';
+    delBtn.onclick = () => {
+      let go = true;
+      try { go = confirm('Delete this message?'); } catch {}
+      if (go) send({ type: 'delete_message', channelId: m.channel, messageId: m.id });
+    };
+    actions.appendChild(delBtn);
+  }
 
   row.append(avCol, body, actions);
   return row;
@@ -760,9 +823,73 @@ function inviteLink(code) {
   return `${location.origin}${location.pathname}?join=${encodeURIComponent(code)}`;
 }
 
+/* Build a crisp, self-contained QR code SVG for a string (no network needed,
+ * so it works in the offline PWA). Dark modules on white = reliably scannable. */
+function qrSvg(text, cell = 6, margin = 2) {
+  const QR = window.qrcode;
+  if (typeof QR !== 'function') return '';
+  try {
+    const qr = QR(0, 'M');
+    qr.addData(text);
+    qr.make();
+    const n = qr.getModuleCount();
+    const dim = (n + margin * 2) * cell;
+    let rects = '';
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (qr.isDark(r, c)) {
+          rects += `<rect x="${(c + margin) * cell}" y="${(r + margin) * cell}" width="${cell}" height="${cell}"/>`;
+        }
+      }
+    }
+    return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${dim} ${dim}" width="${dim}" height="${dim}" shape-rendering="crispEdges" role="img" aria-label="Invite QR code"><rect width="${dim}" height="${dim}" fill="#fff"/><g fill="#0b0d10">${rects}</g></svg>`;
+  } catch { return ''; }
+}
+
 function showInviteModal(link) {
   $('#invite-link').value = link;
+  const qrBox = $('#invite-qr');
+  if (qrBox) qrBox.innerHTML = qrSvg(link) || '<p class="muted">QR code unavailable on this device.</p>';
+  const shareBtn = $('#invite-share');
+  if (shareBtn) {
+    if (navigator.share) {
+      shareBtn.classList.remove('hidden');
+      shareBtn.onclick = () => { navigator.share({ title: 'Ghost Chat invite', text: 'Join my Ghost Chat group:', url: link }).catch(() => {}); };
+    } else {
+      shareBtn.classList.add('hidden');
+    }
+  }
   $('#invite-modal-backdrop').classList.remove('hidden');
+}
+
+/* Accept a full invite URL (?join=CODE / #join=CODE) or a bare code. */
+function parseInviteCode(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const m = s.match(/[?&#]join=([\w-]+)/i);
+  if (m) return m[1];
+  const bare = s.split('/').pop().trim(); // tolerate a pasted URL we don't recognise
+  return /^[\w-]{4,32}$/.test(bare) ? bare : '';
+}
+
+function openJoinModal() {
+  $('#join-code-input').value = '';
+  $('#join-error').classList.add('hidden');
+  $('#join-modal-backdrop').classList.remove('hidden');
+  $('#join-code-input').focus();
+}
+
+function submitJoinCode() {
+  const code = parseInviteCode($('#join-code-input').value);
+  const err = $('#join-error');
+  if (!code) {
+    err.textContent = "That doesn't look like a valid invite link or code.";
+    err.classList.remove('hidden');
+    return;
+  }
+  err.classList.add('hidden');
+  $('#join-modal-backdrop').classList.add('hidden');
+  if (!send({ type: 'join_channel', code })) toast("You're offline — couldn't join. Try again.");
 }
 
 function parseJoinCode() {
@@ -858,7 +985,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closePicker();
-    ['#modal-backdrop', '#dm-modal-backdrop', '#report-modal-backdrop', '#invite-modal-backdrop', '#members-modal-backdrop']
+    ['#modal-backdrop', '#dm-modal-backdrop', '#report-modal-backdrop', '#invite-modal-backdrop', '#members-modal-backdrop', '#join-modal-backdrop']
       .forEach((sel) => $(sel).classList.add('hidden'));
   }
 });
@@ -1544,6 +1671,13 @@ async function boot() {
     $('#invite-copy').textContent = ok ? 'Copied!' : 'Select all + copy';
     setTimeout(() => { $('#invite-copy').textContent = 'Copy'; }, 1500);
   };
+  $('#invite-modal-backdrop').onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden'); };
+
+  $('#join-group').onclick = openJoinModal;
+  $('#join-cancel').onclick = () => $('#join-modal-backdrop').classList.add('hidden');
+  $('#join-submit').onclick = submitJoinCode;
+  $('#join-code-input').onkeydown = (e) => { if (e.key === 'Enter') submitJoinCode(); };
+  $('#join-modal-backdrop').onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden'); };
 
   const input = $('#input');
   input.oninput = () => {

@@ -433,6 +433,25 @@ function createCore(persistence, options = {}) {
         break;
       }
 
+      case 'delete_message': {
+        if (!me) return;
+        const conv = findConv(msg.channelId);
+        if (!conv || !inConv(conv, me.username)) return;
+        const idx = conv.messages.findIndex((x) => x.id === String(msg.messageId));
+        if (idx < 0) return;
+        const m = conv.messages[idx];
+        if (m.system) return; // system notices are not deletable
+        // Allowed: the author, or a group admin/owner (incl. the global owner).
+        if (m.username !== me.username && !isChannelAdmin(conv, me.username)) {
+          send(ws, { type: 'error', message: 'You can only delete your own messages.' });
+          return;
+        }
+        conv.messages.splice(idx, 1);
+        save();
+        broadcastConv(conv, { type: 'message_deleted', channelId: conv.id, messageId: m.id });
+        break;
+      }
+
       case 'typing':
       case 'typing_stop': {
         if (!me) return;

@@ -811,3 +811,21 @@ body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
   font-size: 13px; outline: none;
 }
 .invite-row .primary-btn { width: auto; padding: 10px 16px; }
+
+/* ---- invite QR + join-by-link + rich text + title badge (v10) ---- */
+.side-add-group { display: inline-flex; gap: 6px; }
+.invite-modal { max-width: 420px; }
+.invite-qr {
+  display: flex; align-items: center; justify-content: center;
+  background: #fff; border-radius: var(--radius);
+  padding: 14px; margin: 6px auto 14px; width: fit-content;
+  box-shadow: 0 4px 18px rgba(0,0,0,.35);
+}
+.invite-qr svg { display: block; width: 208px; height: 208px; max-width: 60vw; }
+.msg-text .msg-link { color: #93c5fd; text-decoration: underline; word-break: break-all; }
+.msg-text .msg-link:hover { color: #bfdbfe; }
+.msg-text .mention { color: var(--accent-2); font-weight: 600; }
+.msg-text .mention-me {
+  background: rgba(139, 92, 246, .2); color: #ddd6fe;
+  border-radius: 5px; padding: 0 3px;
+}

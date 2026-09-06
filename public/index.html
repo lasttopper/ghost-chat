@@ -88,7 +88,10 @@
 
         <div class="side-title team-title">
           <span>Groups</span>
-          <button id="add-channel" class="side-add" title="Create a group">＋</button>
+          <span class="side-add-group">
+            <button id="join-group" class="side-add" title="Join with an invite link">🔗</button>
+            <button id="add-channel" class="side-add" title="Create a group">＋</button>
+          </span>
         </div>
         <div id="channel-list" class="side-list"></div>
 
@@ -190,15 +193,31 @@
 
   <!-- invite link modal -->
   <div id="invite-modal-backdrop" class="modal-backdrop hidden">
-    <div class="modal">
-      <h3>🔗 Invite link</h3>
-      <p class="muted">Anyone with this link can join the group.</p>
+    <div class="modal invite-modal">
+      <h3>🔗 Invite to group</h3>
+      <p class="muted">Share this link or QR code — anyone who opens it joins automatically.</p>
+      <div id="invite-qr" class="invite-qr"></div>
       <div class="invite-row">
         <input id="invite-link" readonly>
         <button id="invite-copy" class="primary-btn">Copy</button>
       </div>
       <div class="modal-actions">
-        <button id="invite-close">Done</button>
+        <button id="invite-share" class="hidden">Share…</button>
+        <button id="invite-close" class="primary-btn">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- join via invite link modal -->
+  <div id="join-modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <h3>🔗 Join with an invite link</h3>
+      <p class="muted">Paste a group's invite link — or just its code — to join.</p>
+      <input id="join-code-input" placeholder="https://…/?join=AbC123  or  AbC123" autocomplete="off" spellcheck="false">
+      <div id="join-error" class="auth-error hidden"></div>
+      <div class="modal-actions">
+        <button id="join-cancel">Cancel</button>
+        <button id="join-submit" class="primary-btn">Join group</button>
       </div>
     </div>
   </div>
@@ -220,6 +239,7 @@
     </div>
   </div>
 
-<script src="app.js?v=9"></script>
+<script src="qrcode.js?v=1"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>
