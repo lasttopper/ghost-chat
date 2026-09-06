@@ -99,7 +99,8 @@ function stopServer() { try { server.kill('SIGKILL'); } catch {} }
   html = html
     .replace('<script src="firebase-config.js"></script>', inline('firebase-config.js'))
     .replace('<script src="backend-config.js"></script>', inline('backend-config.js'))
-    .replace('<script src="app.js"></script>', inline('app.js'));
+    // tolerate the cache-busting query string on app.js (e.g. app.js?v=5)
+    .replace(/<script src="app\.js[^"]*"><\/script>/, inline('app.js'));
 
   const dom2 = new JSDOM(html, {
     url: BASE, runScripts: 'dangerously', pretendToBeVisual: true,
