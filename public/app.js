@@ -1197,6 +1197,36 @@ function downscaleImage(file, maxSide, quality) {
   });
 }
 
+async function uploadImage(dataUrl) {
+  // 1) Direct from the device to ImgBB. ImgBB rejects cloud-server IPs
+  //    (error 103) but accepts user devices, and their API sends
+  //    Access-Control-Allow-Origin: * so this works from the WebView too.
+  const cfg = window.IMGBB_CONFIG;
+  if (cfg && cfg.apiKey) {
+    try {
+      const form = new FormData();
+      form.append('key', cfg.apiKey);
+      form.append('image', dataUrl.slice(dataUrl.indexOf(',') + 1));
+      const r = await fetch(cfg.apiUrl || 'https://api.imgbb.com/1/upload', { method: 'POST', body: form });
+      const j = await r.json().catch(() => null);
+      if (j && j.success && j.data && /^https:\/\/i\.ibb\.co\//.test(j.data.url || '')) return j.data.url;
+      throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+    } catch (e) {
+      console.warn('direct image upload failed, trying server proxy:', e && e.message);
+    }
+  }
+  // 2) Fallback: the server proxies the upload (works whenever the host
+  //    accepts server IPs, e.g. a different host configured server-side).
+  const r = await fetch('/api/upload-image', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: dataUrl }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok || !j.ok || !j.url) throw new Error(j.error || ('HTTP ' + r.status));
+  return j.url;
+}
+
 async function handleImagePick(file) {
   if (!file) return;
   if (!S.active) { toast('Open a conversation first.'); return; }
@@ -1209,14 +1239,7 @@ async function handleImagePick(file) {
   $('#attach-thumb').src = dataUrl;
   setAttachPreview(true, 'Uploading…');
   try {
-    const r = await fetch('/api/upload-image', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUrl }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok || !j.ok || !j.url) throw new Error(j.error || ('HTTP ' + r.status));
-    pendingImage = j.url;
+    pendingImage = await uploadImage(dataUrl);
     setAttachPreview(true, 'Tap send to post this image (add a caption if you like)');
   } catch (e) {
     setAttachPreview(false);

@@ -46,6 +46,11 @@ ok(/AndroidBridge\.stopKeepAlive/.test(app), 'web stops keep-alive on sign-out')
 ok(/image-file/.test(app) && /handleImagePick/.test(app) && /\/api\/upload-image/.test(app),
   'composer image button uploads via the server endpoint');
 ok(/openLightbox/.test(app) && /m\.image/.test(app), 'image messages render + open fullscreen');
+ok(/IMGBB_CONFIG/.test(app) && /uploadImage/.test(app), 'client-side direct upload with server fallback');
+const cfg = read('public/imgbb-config.js');
+ok(/apiKey:\s*'[0-9a-f]{32}'/.test(cfg) && /api\.imgbb\.com/.test(cfg), 'imgbb config present with key + endpoint');
+const html = read('public/index.html');
+ok(/imgbb-config\.js/.test(html) && /app\.js\?v=18/.test(html), 'config script loaded before app.js (v18)');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
