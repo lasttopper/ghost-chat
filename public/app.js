@@ -134,11 +134,7 @@ function updateNotifBtn() {
 }
 
 function notifyMessage(m) {
-  if (!notifEnabled || !notifSupported()) return;
-  // Desktop (Notification constructor present) needs explicit permission.
-  // Android/TWA has no constructor and relies on SW notifications delegated
-  // to the OS, so only block when the constructor exists AND isn't granted.
-  if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') return;
+  if (!notifEnabled) return;
   if (m.system) return;
   if (m.username === S.me.username) return;
   // quiet when you're looking at the conversation that got the message
@@ -149,6 +145,22 @@ function notifyMessage(m) {
     : 'Ghost Chat';
   const title = `${where} — @${m.username}`;
   const body = m.text.length > 110 ? m.text.slice(0, 110) + '…' : m.text;
+
+  // Native Android app (WebView): a WebView has no Web Notification UI, so the
+  // native side shows the system notification. window.AndroidBridge is injected
+  // ONLY inside the APK (absent in a normal browser / TWA), so this is safe
+  // everywhere else.
+  if (window.AndroidBridge && typeof window.AndroidBridge.showNotification === 'function') {
+    try { window.AndroidBridge.showNotification(title, body, 'gc-' + m.channel); } catch {}
+    return;
+  }
+
+  // Web / TWA path
+  if (!notifSupported()) return;
+  // Desktop (Notification constructor present) needs explicit permission.
+  // Android/TWA has no constructor and relies on SW notifications delegated
+  // to the OS, so only block when the constructor exists AND isn't granted.
+  if (typeof Notification !== 'undefined' && Notification.permission !== 'granted') return;
   const opts = {
     body,
     icon: 'icons/icon-192.png',
@@ -943,11 +955,7 @@ setInterval(renderTyping, 1000);
  * snipping tools, or OS shortcuts the browser never receives — it is a
  * deterrent, not a guarantee. */
 let lastScreenshotAt = 0;
-function screenshotSignal(e) {
-  const k = e.key || '';
-  const isPrtScn = k === 'PrintScreen' || k.toLowerCase() === 'printscreen';
-  const isMacShot = e.metaKey && e.shiftKey && ['3', '4', '5'].includes(k); // macOS ⌘⇧3/4/5
-  if (!(isPrtScn || isMacShot)) return;
+function reportScreenshot() {
   if (!S.active) return;
   const now = Date.now();
   if (now - lastScreenshotAt < 8000) return; // debounce held keys / spam
@@ -956,6 +964,17 @@ function screenshotSignal(e) {
     toast('📸 Screenshot detected — the chat was notified.');
   }
 }
+// Desktop keyboard-shortcut signal (web best-effort — see notes above).
+function screenshotSignal(e) {
+  const k = e.key || '';
+  const isPrtScn = k === 'PrintScreen' || k.toLowerCase() === 'printscreen';
+  const isMacShot = e.metaKey && e.shiftKey && ['3', '4', '5'].includes(k); // macOS ⌘⇧3/4/5
+  if (isPrtScn || isMacShot) reportScreenshot();
+}
+// The native Android app (WebView) calls this when the OS detects a REAL
+// screenshot (power+volume). It reuses the same in-chat notice as the desktop
+// keyboard path. No-op everywhere else (nothing assigns it).
+window.__ghostOnScreenshot = reportScreenshot;
 
 /* ------------------------------ emoji picker ------------------------------ */
 
