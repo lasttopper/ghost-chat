@@ -163,15 +163,21 @@ public class MainActivity extends Activity {
     /* ------------------------------- permissions ------------------------------- */
 
     private void requestRuntimePermissions() {
+        // ONE combined request: calling requestPermissions() twice back-to-back
+        // cancels the first dialog, silently losing a permission.
+        java.util.List<String> perms = new java.util.ArrayList<>();
         String imagesPerm = Build.VERSION.SDK_INT >= 33
                 ? Manifest.permission.READ_MEDIA_IMAGES
                 : Manifest.permission.READ_EXTERNAL_STORAGE;
         if (checkSelfPermission(imagesPerm) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{ imagesPerm }, REQ_IMAGES);
+            perms.add(imagesPerm);
         }
         if (Build.VERSION.SDK_INT >= 33
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-            requestPermissions(new String[]{ Manifest.permission.POST_NOTIFICATIONS }, REQ_NOTIF);
+            perms.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (!perms.isEmpty()) {
+            requestPermissions(perms.toArray(new String[0]), REQ_IMAGES);
         }
     }
 
@@ -320,6 +326,30 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void showNotification(String title, String body, String tag) {
             showNativeNotification(title, body, tag);
+        }
+
+        /** OS-level notification permission state (always true below Android 13). */
+        @JavascriptInterface
+        public boolean hasNotificationPermission() {
+            if (Build.VERSION.SDK_INT < 33) return true;
+            try {
+                return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                        == PackageManager.PERMISSION_GRANTED;
+            } catch (Throwable t) { return false; }
+        }
+
+        /** (Re-)show the OS notification permission prompt (Android 13+). */
+        @JavascriptInterface
+        public void requestNotificationPermission() {
+            runOnUiThread(() -> {
+                try {
+                    if (Build.VERSION.SDK_INT >= 33
+                            && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                                    != PackageManager.PERMISSION_GRANTED) {
+                        requestPermissions(new String[]{ Manifest.permission.POST_NOTIFICATIONS }, REQ_NOTIF);
+                    }
+                } catch (Throwable ignored) {}
+            });
         }
 
         /* ---------------- native Google sign-in (Firebase session) ----------------

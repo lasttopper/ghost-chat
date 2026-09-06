@@ -96,6 +96,32 @@ function notifSupported() {
 }
 
 async function toggleNotifications() {
+  if (isNativeApp()) {
+    // WebView APK: no Web Notification API — the native shell shows system
+    // notifications. Never gate on notifSupported() here.
+    if (notifEnabled) {
+      notifEnabled = false;
+      ls.set('ghost.notif', '0');
+      updateNotifBtn();
+      toast('🔕 Notifications muted');
+      return;
+    }
+    notifEnabled = true;
+    ls.set('ghost.notif', '1');
+    updateNotifBtn();
+    let granted = true;
+    try {
+      granted = window.AndroidBridge.hasNotificationPermission
+        ? window.AndroidBridge.hasNotificationPermission() : true;
+      if (!granted && window.AndroidBridge.requestNotificationPermission) {
+        window.AndroidBridge.requestNotificationPermission();
+      }
+    } catch {}
+    toast(granted
+      ? '🔔 Notifications on'
+      : '🔔 Tap “Allow” on the Android prompt to finish enabling.');
+    return;
+  }
   if (!notifSupported()) { toast('Notifications are not supported here.'); return; }
   if (notifEnabled) {
     notifEnabled = false;
@@ -1747,6 +1773,12 @@ async function boot() {
     // Android/TWA without the Notification constructor: notifications are
     // delegated to the OS by the launcher, so respect the stored pref.
     notifEnabled = ls.get('ghost.notif') === '1';
+  }
+  if (isNativeApp()) {
+    // WebView APK: the native shell asks for POST_NOTIFICATIONS at the OS
+    // level, so notifications default ON — the in-app toggle only tracks an
+    // explicit user mute. (Without this the APK silently never notifies.)
+    notifEnabled = ls.get('ghost.notif') !== '0';
   }
 
   /* shared wiring */
