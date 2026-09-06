@@ -36,8 +36,24 @@ jobs:
           sed -i "s/versionCode [0-9]\+/versionCode $VC/" app/build.gradle
           echo "versionCode -> $VC"
 
+      - name: Prepare signing keystore
+        run: |
+          # Decode the SAME keystore the TWA release was signed with, so this
+          # WebView build is an update to the same app (matching signature).
+          mkdir -p twa
+          if [ -n "${{ secrets.TWA_KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.TWA_KEYSTORE_BASE64 }}" | base64 -d > twa/android.keystore
+            echo "Keystore restored from TWA_KEYSTORE_BASE64 ($(wc -c < twa/android.keystore) bytes)"
+          else
+            echo "::error::TWA_KEYSTORE_BASE64 secret is not set - cannot sign with the release key."
+            exit 1
+          fi
+
       - name: Build signed release APK
         working-directory: android
+        env:
+          GHOST_KEYSTORE_PASSWORD: ${{ secrets.TWA_KEYSTORE_PASSWORD }}
+          GHOST_KEY_PASSWORD: ${{ secrets.TWA_KEY_PASSWORD }}
         run: gradle assembleRelease --no-daemon --stacktrace
 
       - name: Upload APK
