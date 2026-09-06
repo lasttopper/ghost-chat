@@ -24,23 +24,21 @@ function seedState() {
   return {
     nextMessageId: 1,
     lastDigestDate: null,
-    users: { 'GhostBot': { color: '#8b5cf6', authId: 'system:ghostbot', createdAt: now } },
+    users: {},
     channels: [
       {
         id: 'general', name: 'general', type: 'channel', private: false, inviteCode: null,
-        members: [], createdBy: 'GhostBot',
+        members: [], createdBy: 'system',
         topic: 'Everyone is here. Say hi 👻',
         createdAt: now,
         messages: [
-          { id: 'm-seed-1', channel: 'general', username: 'system', color: '', ts: now - 1000, system: true,
-            text: 'Welcome to Ghost Chat! This is the beginning of #general.', reactions: {} },
-          { id: 'm-seed-2', channel: 'general', username: 'GhostBot', color: '#8b5cf6', ts: now, system: false,
-            text: "Hey! Create a private group (🔒) and share its invite link, or slide into someone's DMs from the sidebar. Hover any message to react 😀 or report 🚩.", reactions: {} },
+          { id: 'm-seed-1', channel: 'general', username: 'system', color: '', ts: now, system: true,
+            text: 'Welcome to Ghost Chat! This is the beginning of #general. Create a private group (🔒) and share its invite link, or slide into someone\'s DMs from the sidebar.', reactions: {} },
         ],
       },
       {
         id: 'random', name: 'random', type: 'channel', private: false, inviteCode: null,
-        members: [], createdBy: 'GhostBot',
+        members: [], createdBy: 'system',
         topic: 'Non-work banter and water cooler conversation',
         createdAt: now, messages: [],
       },
@@ -52,6 +50,8 @@ function seedState() {
 
 function normalizeState(s) {
   s.users = s.users || {};
+  // Remove the legacy seeded bot so no "fake user" lingers in older saved state.
+  delete s.users['GhostBot'];
   s.channels = s.channels || [];
   s.dms = s.dms || [];
   s.reports = s.reports || [];
@@ -62,6 +62,11 @@ function normalizeState(s) {
     if (!('private' in c)) c.private = false;
     if (!('members' in c)) c.members = [];
     if (!('inviteCode' in c)) c.inviteCode = null;
+    // Private groups get an admin list; the creator is always the owner-admin.
+    if (c.private) {
+      if (!Array.isArray(c.admins)) c.admins = [];
+      if (c.createdBy && !c.admins.includes(c.createdBy)) c.admins.unshift(c.createdBy);
+    }
   }
   return s;
 }
@@ -146,6 +151,9 @@ function createCore(persistence) {
   // null = everyone (public channel); array = only these usernames
   const convMembers = (conv) => (!conv ? null : (conv.type === 'dm' || conv.private) ? conv.members : null);
   const inConv = (conv, username) => { const m = convMembers(conv); return !m || m.includes(username); };
+  // Only private groups have admins; the creator is always the owner-admin.
+  const isChannelAdmin = (conv, username) =>
+    !!conv && conv.private === true && Array.isArray(conv.admins) && conv.admins.includes(username);
 
   const broadcastConv = (conv, obj, except) => {
     const data = JSON.stringify(obj);
@@ -318,6 +326,7 @@ function createCore(persistence) {
           id: name, name, type: 'channel', private: isPrivate,
           inviteCode: isPrivate ? newInviteCode() : null,
           members: isPrivate ? [me.username] : [],
+          admins: isPrivate ? [me.username] : [],
           createdBy: me.username, topic: isPrivate ? 'Private group — invite link only' : '',
           createdAt: Date.now(),
           messages: [sysMessage(name, isPrivate
@@ -344,6 +353,72 @@ function createCore(persistence) {
           broadcastConv(channel, { type: 'message', message: sys }, ws);
         }
         send(ws, { type: 'channel_joined', channel });
+        break;
+      }
+
+      /* ---- group admin: add / remove members, manage roles (private only) ---- */
+
+      case 'add_member': {
+        if (!me) return;
+        const conv = getChannel(msg.channelId);
+        if (!conv || !conv.private) { send(ws, { type: 'error', message: 'Members can only be managed in private groups.' }); return; }
+        if (!isChannelAdmin(conv, me.username)) { send(ws, { type: 'error', message: 'Only group admins can add members.' }); return; }
+        const target = String(msg.username || '').toLowerCase().trim();
+        if (!state.users[target]) { send(ws, { type: 'error', message: `No user @${target}.` }); return; }
+        if (conv.members.includes(target)) { send(ws, { type: 'error', message: `@${target} is already a member.` }); return; }
+        conv.members.push(target);
+        const sys = sysMessage(conv.id, `${me.username} added @${target}`);
+        conv.messages.push(sys);
+        save();
+        broadcastConv(conv, { type: 'member_added', channelId: conv.id, username: target, by: me.username });
+        broadcastConv(conv, { type: 'message', message: sys });
+        // hand the added user the full channel so it appears in their sidebar
+        for (const [otherWs, c] of clients) {
+          if (c.username === target && otherWs !== ws) send(otherWs, { type: 'channel_joined', channel: conv });
+        }
+        break;
+      }
+
+      case 'remove_member': {
+        if (!me) return;
+        const conv = getChannel(msg.channelId);
+        if (!conv || !conv.private) { send(ws, { type: 'error', message: 'Members can only be managed in private groups.' }); return; }
+        if (!isChannelAdmin(conv, me.username)) { send(ws, { type: 'error', message: 'Only group admins can remove members.' }); return; }
+        const target = String(msg.username || '').toLowerCase().trim();
+        if (target === conv.createdBy) { send(ws, { type: 'error', message: 'The group owner cannot be removed.' }); return; }
+        if (!conv.members.includes(target)) { send(ws, { type: 'error', message: `@${target} is not a member.` }); return; }
+        conv.members = conv.members.filter((m) => m !== target);
+        if (Array.isArray(conv.admins)) conv.admins = conv.admins.filter((a) => a !== target);
+        const sys = sysMessage(conv.id, `${me.username} removed @${target}`);
+        conv.messages.push(sys);
+        save();
+        // tell the removed user directly (they're no longer in the conv broadcast)
+        for (const [otherWs, c] of clients) {
+          if (c.username === target) send(otherWs, { type: 'removed_from_channel', channelId: conv.id });
+        }
+        broadcastConv(conv, { type: 'member_removed', channelId: conv.id, username: target, by: me.username });
+        broadcastConv(conv, { type: 'message', message: sys });
+        break;
+      }
+
+      case 'promote_admin':
+      case 'demote_admin': {
+        if (!me) return;
+        const conv = getChannel(msg.channelId);
+        if (!conv || !conv.private) { send(ws, { type: 'error', message: 'Admins can only be managed in private groups.' }); return; }
+        if (!isChannelAdmin(conv, me.username)) { send(ws, { type: 'error', message: 'Only group admins can change roles.' }); return; }
+        const target = String(msg.username || '').toLowerCase().trim();
+        if (!conv.members.includes(target)) { send(ws, { type: 'error', message: `@${target} is not a member.` }); return; }
+        if (target === conv.createdBy) { send(ws, { type: 'error', message: 'The owner is always an admin.' }); return; }
+        if (!Array.isArray(conv.admins)) conv.admins = [];
+        const promote = msg.type === 'promote_admin';
+        if (promote && !conv.admins.includes(target)) conv.admins.push(target);
+        if (!promote) conv.admins = conv.admins.filter((a) => a !== target);
+        const sys = sysMessage(conv.id, `${me.username} ${promote ? 'promoted @' + target + ' to admin' : 'removed @' + target + ' as admin'}`);
+        conv.messages.push(sys);
+        save();
+        broadcastConv(conv, { type: 'admins_updated', channelId: conv.id, admins: conv.admins });
+        broadcastConv(conv, { type: 'message', message: sys });
         break;
       }
 

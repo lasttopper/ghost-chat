@@ -109,6 +109,7 @@
           <div class="ch-title">
             <span id="ch-kind-icon">#</span><span id="ch-name"></span>
             <button id="invite-btn" class="invite-btn hidden" title="Copy invite link">🔗 Invite</button>
+            <button id="members-btn" class="invite-btn hidden" title="Members">👥 Members</button>
           </div>
           <div id="ch-topic" class="ch-topic"></div>
         </div>
@@ -202,6 +203,23 @@
     </div>
   </div>
 
-<script src="app.js?v=5"></script>
+  <!-- group members / admin modal -->
+  <div id="members-modal-backdrop" class="modal-backdrop hidden">
+    <div class="modal">
+      <h3>👥 Members</h3>
+      <p class="muted" id="members-subtitle"></p>
+      <div id="member-list" class="member-list"></div>
+      <div id="add-member-wrap" class="add-member-wrap hidden">
+        <div class="add-member-title">Add a member</div>
+        <input id="add-member-search" class="dm-search" type="search" placeholder="Search people by @username…" autocomplete="off" spellcheck="false">
+        <div id="add-member-results" class="dm-user-list"></div>
+      </div>
+      <div class="modal-actions">
+        <button id="members-close">Done</button>
+      </div>
+    </div>
+  </div>
+
+<script src="app.js?v=6"></script>
 </body>
 </html>

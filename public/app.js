@@ -328,6 +328,43 @@ function route(msg) {
       if (S.active === msg.channelId) renderHeader();
       break;
     }
+    case 'member_added': {
+      const conv = getConv(msg.channelId);
+      if (conv && !conv.members.includes(msg.username)) conv.members.push(msg.username);
+      if (S.active === msg.channelId) renderHeader();
+      if (msg.username === S.me.username) toast(`You were added to #${conv ? conv.name : msg.channelId}`);
+      if (!$('#members-modal-backdrop').classList.contains('hidden')) drawMembers();
+      break;
+    }
+    case 'member_removed': {
+      const conv = getConv(msg.channelId);
+      if (conv) {
+        conv.members = conv.members.filter((m) => m !== msg.username);
+        if (Array.isArray(conv.admins)) conv.admins = conv.admins.filter((a) => a !== msg.username);
+      }
+      if (S.active === msg.channelId) renderHeader();
+      if (!$('#members-modal-backdrop').classList.contains('hidden')) drawMembers();
+      break;
+    }
+    case 'admins_updated': {
+      const conv = getConv(msg.channelId);
+      if (conv) conv.admins = msg.admins;
+      if (!$('#members-modal-backdrop').classList.contains('hidden')) drawMembers();
+      break;
+    }
+    case 'removed_from_channel': {
+      const i = S.channels.findIndex((c) => c.id === msg.channelId);
+      if (i >= 0) S.channels.splice(i, 1);
+      $('#members-modal-backdrop').classList.add('hidden');
+      toast('You were removed from the group.', 'leave');
+      if (S.active === msg.channelId) {
+        const next = S.channels[0] || S.dms[0];
+        S.active = null;
+        if (next) switchConv(next.id); else renderAll();
+      }
+      renderSidebar();
+      break;
+    }
     case 'dm_ready': {
       const i = S.dms.findIndex((d) => d.id === msg.conv.id);
       if (i >= 0) S.dms[i] = msg.conv; else S.dms.push(msg.conv);
@@ -466,7 +503,7 @@ function renderSidebar() {
   /* People — online first; offline collapsed behind a toggle */
   const team = $('#team-list');
   team.innerHTML = '';
-  const allNames = Object.keys(S.users).filter((u) => u !== 'GhostBot');
+  const allNames = Object.keys(S.users);
   const peopleOnline = $('#people-online');
   if (peopleOnline) peopleOnline.textContent = `${S.online.size} online`;
   const onlineNamesList = allNames.filter((n) => S.online.has(n)).sort((a, b) => a.localeCompare(b));
@@ -507,13 +544,15 @@ function renderHeader() {
   const name = $('#ch-name');
   const topic = $('#ch-topic');
   const invite = $('#invite-btn');
-  if (!conv) { icon.textContent = '#'; name.textContent = ''; topic.textContent = ''; invite.classList.add('hidden'); return; }
+  const members = $('#members-btn');
+  if (!conv) { icon.textContent = '#'; name.textContent = ''; topic.textContent = ''; invite.classList.add('hidden'); members.classList.add('hidden'); return; }
   if (conv.type === 'dm') {
     const partner = dmPartner(conv);
     icon.textContent = '@';
     name.textContent = partner;
     topic.textContent = S.online.has(partner) ? '🟢 online' : 'offline';
     invite.classList.add('hidden');
+    members.classList.add('hidden');
   } else {
     icon.textContent = conv.private ? '🔒' : '#';
     name.textContent = conv.name;
@@ -521,6 +560,7 @@ function renderHeader() {
       ? `Private group · ${conv.members.length} member${conv.members.length === 1 ? '' : 's'}`
       : (conv.topic || '');
     invite.classList.toggle('hidden', !conv.private);
+    members.classList.toggle('hidden', !conv.private);
   }
 }
 
@@ -779,7 +819,7 @@ document.addEventListener('click', (e) => {
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     closePicker();
-    ['#modal-backdrop', '#dm-modal-backdrop', '#report-modal-backdrop', '#invite-modal-backdrop']
+    ['#modal-backdrop', '#dm-modal-backdrop', '#report-modal-backdrop', '#invite-modal-backdrop', '#members-modal-backdrop']
       .forEach((sel) => $(sel).classList.add('hidden'));
   }
 });
@@ -839,7 +879,7 @@ function openDmModal() {
     const q = search.value.trim().toLowerCase().replace(/^@/, '');
     list.innerHTML = '';
     const names = Object.keys(S.users)
-      .filter((u) => u !== S.me.username && u !== 'GhostBot')
+      .filter((u) => u !== S.me.username)
       .filter((u) => !q || u.includes(q))
       .sort((a, b) => (S.online.has(b) - S.online.has(a)) || a.localeCompare(b)); // online first
     if (!names.length) {
@@ -876,6 +916,116 @@ function openDmModal() {
   draw();
   $('#dm-modal-backdrop').classList.remove('hidden');
   search.focus();
+}
+
+/* ------------------------ group members / admin ------------------------ */
+
+// Only private groups have admins; the creator is the owner (always an admin).
+function isChannelAdmin(conv) {
+  return !!(conv && conv.private && Array.isArray(conv.admins) && conv.admins.includes(S.me.username));
+}
+
+function openMembersModal() {
+  const conv = getConv(S.active);
+  if (!conv || !conv.private) return;
+  drawMembers();
+  $('#members-modal-backdrop').classList.remove('hidden');
+}
+
+function drawMembers() {
+  const conv = getConv(S.active);
+  if (!conv || !conv.private) return;
+  const admin = isChannelAdmin(conv);
+  const list = $('#member-list');
+  list.innerHTML = '';
+  $('#members-subtitle').textContent = admin
+    ? 'You are an admin — add or remove members and manage roles.'
+    : `${conv.members.length} member${conv.members.length === 1 ? '' : 's'}`;
+
+  const rank = (u) => (u === conv.createdBy ? 0 : (conv.admins && conv.admins.includes(u) ? 1 : 2));
+  const names = [...conv.members].sort((a, b) => (rank(a) - rank(b)) || a.localeCompare(b));
+
+  for (const name of names) {
+    const row = document.createElement('div');
+    row.className = 'member-row';
+    const av = document.createElement('span');
+    av.className = 'dm-avatar';
+    av.style.background = userColor(name);
+    av.textContent = initials(name);
+    const label = document.createElement('span');
+    label.className = 'member-name';
+    label.textContent = '@' + name + (name === S.me.username ? ' (you)' : '');
+    row.append(av, label);
+
+    const isOwner = name === conv.createdBy;
+    const isAdmin = !isOwner && conv.admins && conv.admins.includes(name);
+    if (isOwner || isAdmin) {
+      const badge = document.createElement('span');
+      badge.className = 'role-badge' + (isOwner ? ' owner' : '');
+      badge.textContent = isOwner ? 'owner' : 'admin';
+      row.appendChild(badge);
+    }
+
+    // Admin controls for every member except the owner (and except yourself).
+    if (admin && !isOwner && name !== S.me.username) {
+      const actions = document.createElement('span');
+      actions.className = 'member-actions';
+      const roleBtn = document.createElement('button');
+      roleBtn.className = 'mini-btn';
+      roleBtn.textContent = isAdmin ? 'Demote' : 'Make admin';
+      roleBtn.onclick = () => send({ type: isAdmin ? 'demote_admin' : 'promote_admin', channelId: conv.id, username: name });
+      const rmBtn = document.createElement('button');
+      rmBtn.className = 'mini-btn danger';
+      rmBtn.textContent = 'Remove';
+      rmBtn.onclick = () => send({ type: 'remove_member', channelId: conv.id, username: name });
+      actions.append(roleBtn, rmBtn);
+      row.appendChild(actions);
+    }
+    list.appendChild(row);
+  }
+
+  // Add-member panel (admins only): pick any existing user not yet in the group.
+  const wrap = $('#add-member-wrap');
+  wrap.classList.toggle('hidden', !admin);
+  if (admin) {
+    const search = $('#add-member-search');
+    const results = $('#add-member-results');
+    const drawResults = () => {
+      const q = search.value.trim().toLowerCase().replace(/^@/, '');
+      results.innerHTML = '';
+      const candidates = Object.keys(S.users)
+        .filter((u) => !conv.members.includes(u))
+        .filter((u) => !q || u.includes(q))
+        .sort((a, b) => (S.online.has(b) - S.online.has(a)) || a.localeCompare(b))
+        .slice(0, 40);
+      if (!candidates.length) {
+        const p = document.createElement('p');
+        p.className = 'muted';
+        p.textContent = q ? `No users matching "@${q}".` : 'Everyone you know is already a member.';
+        results.appendChild(p);
+        return;
+      }
+      for (const name of candidates) {
+        const btn = document.createElement('button');
+        btn.className = 'dm-user';
+        const av = document.createElement('span');
+        av.className = 'dm-avatar';
+        av.style.background = userColor(name);
+        av.textContent = initials(name);
+        const label = document.createElement('span');
+        label.textContent = '@' + name;
+        const add = document.createElement('span');
+        add.className = 'add-tag';
+        add.textContent = '＋ Add';
+        btn.append(av, label, add);
+        btn.onclick = () => send({ type: 'add_member', channelId: conv.id, username: name });
+        results.appendChild(btn);
+      }
+    };
+    search.value = '';
+    search.oninput = drawResults;
+    drawResults();
+  }
 }
 
 /* ------------------------------ auth screens ------------------------------ */
@@ -1345,6 +1495,9 @@ async function boot() {
     if (conv && conv.inviteCode) showInviteModal(inviteLink(conv.inviteCode));
   };
   $('#invite-close').onclick = () => $('#invite-modal-backdrop').classList.add('hidden');
+  $('#members-btn').onclick = openMembersModal;
+  $('#members-close').onclick = () => $('#members-modal-backdrop').classList.add('hidden');
+  $('#members-modal-backdrop').onclick = (e) => { if (e.target === e.currentTarget) e.currentTarget.classList.add('hidden'); };
   $('#invite-copy').onclick = async () => {
     const ok = await copyText($('#invite-link').value);
     $('#invite-copy').textContent = ok ? 'Copied!' : 'Select all + copy';
