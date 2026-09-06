@@ -23,6 +23,10 @@ const RESERVED = new Set([
 ]);
 const BOT = 'ghostbot';            // the built-in assistant/guide
 const BOT_COLOR = '#8b5cf6';
+// The global owner/super-admin account (by Firebase sign-in email). This
+// account may claim reserved names and can moderate every private group.
+const OWNER_EMAIL = String(process.env.OWNER_EMAIL || 'rajkatrina90@gmail.com').toLowerCase().trim();
+const isOwnerEmail = (email) => String(email || '').toLowerCase().trim() === OWNER_EMAIL && OWNER_EMAIL !== '';
 const OFFLINE_GRACE_MS = 4000;
 const SAVE_DEBOUNCE_MS = 300;
 
@@ -211,8 +215,11 @@ function createCore(persistence) {
   const convMembers = (conv) => (!conv ? null : (conv.type === 'dm' || conv.private) ? conv.members : null);
   const inConv = (conv, username) => { const m = convMembers(conv); return !m || m.includes(username); };
   // Only private groups have admins; the creator is always the owner-admin.
+  // The global owner account (OWNER_EMAIL) is a super-admin everywhere.
+  const isOwner = (username) => !!(username && state.users[username] && state.users[username].owner === true);
   const isChannelAdmin = (conv, username) =>
-    !!conv && conv.private === true && Array.isArray(conv.admins) && conv.admins.includes(username);
+    !!conv && conv.private === true &&
+    (isOwner(username) || (Array.isArray(conv.admins) && conv.admins.includes(username)));
 
   const broadcastConv = (conv, obj, except) => {
     const data = JSON.stringify(obj);
@@ -266,12 +273,14 @@ function createCore(persistence) {
     clients.set(ws, me);
 
     const u = state.users[username] || {};
+    const owner = isOwnerEmail(email) || u.owner === true;
     state.users[username] = {
       color,
       authId,
       email: email || u.email || '',
       displayName: displayName || u.displayName || '',
       createdAt: u.createdAt || Date.now(),
+      owner: owner || undefined,
     };
     save();
 
@@ -291,6 +300,7 @@ function createCore(persistence) {
       users: state.users,
       online: onlineNames(),
       now: Date.now(),
+      isOwner: state.users[username] && state.users[username].owner === true,
     });
     if (isNewlyOnline) broadcastPresence();
   }
@@ -299,11 +309,12 @@ function createCore(persistence) {
   function admitUsername(ws, msg) {
     const username = String(msg.username || '').toLowerCase().trim();
     if (!validUsername(username)) {
-      send(ws, { type: 'error', message: 'Username: 3–20 chars, lowercase letters, numbers, underscore.' });
+      send(ws, { type: 'need_username', reason: 'Username: 3–20 chars, lowercase letters, numbers, underscore.' });
       return null;
     }
-    if (RESERVED.has(username)) {
-      send(ws, { type: 'error', message: 'That username is reserved.' });
+    // Reserved role names are blocked for everyone EXCEPT the owner account.
+    if (RESERVED.has(username) && !isOwnerEmail(msg.email)) {
+      send(ws, { type: 'need_username', reason: 'That username is reserved — please pick another.' });
       return null;
     }
     // authId: Firebase uid or per-browser guest id. Legacy/test clients without
@@ -478,6 +489,7 @@ function createCore(persistence) {
         if (!isChannelAdmin(conv, me.username)) { send(ws, { type: 'error', message: 'Only group admins can remove members.' }); return; }
         const target = String(msg.username || '').toLowerCase().trim();
         if (target === conv.createdBy) { send(ws, { type: 'error', message: 'The group owner cannot be removed.' }); return; }
+        if (isOwner(target)) { send(ws, { type: 'error', message: 'The owner cannot be removed.' }); return; }
         if (!conv.members.includes(target)) { send(ws, { type: 'error', message: `@${target} is not a member.` }); return; }
         conv.members = conv.members.filter((m) => m !== target);
         if (Array.isArray(conv.admins)) conv.admins = conv.admins.filter((a) => a !== target);

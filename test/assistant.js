@@ -70,8 +70,8 @@ class Client {
     const C = new Client('bad');
     await C.connect();
     C.send({ type: 'join', username: bad, authId: 'auth-' + bad + sfx, color: '#4f8cff', guest: true });
-    const err = await C.waitFor('error', (m) => /reserved/i.test(m.message || ''));
-    ok(!!err, `reserved username "${bad}" rejected`);
+    const rej = await C.waitFor('need_username', (m) => /reserved/i.test(m.reason || ''));
+    ok(!!rej, `reserved username "${bad}" rejected`);
     C.close();
   }
 

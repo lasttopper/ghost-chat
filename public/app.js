@@ -231,8 +231,14 @@ function wsUrl() {
 function connect() {
   // retire any previous socket without letting its onclose spawn a duplicate
   if (S.ws) { try { S.ws.onclose = null; S.ws.onmessage = null; S.ws.close(); } catch {} }
+  if (S.openTimer) clearTimeout(S.openTimer);
   S.ws = new WebSocket(wsUrl());
+  // Safety net: if the socket never opens (hung CONNECTING on a bad network),
+  // force it closed so onclose fires and the retry loop keeps trying — the UI
+  // must never sit on "connecting…" forever.
+  S.openTimer = setTimeout(() => { try { if (S.ws && S.ws.readyState !== 1) S.ws.close(); } catch {} }, 10000);
   S.ws.onopen = () => {
+    clearTimeout(S.openTimer);
     S.reconnectDelay = 1000;
     $('#reconnect-banner').classList.add('hidden');
     send({
@@ -271,6 +277,7 @@ function route(msg) {
       S.online = new Set(msg.online || []);
       S.serverNow = msg.now;
       S.me.username = msg.username;
+      S.me.owner = !!msg.isOwner; // global owner (super-admin) account
       // remember the account-bound name + color locally (fast next boot)
       ls.set('ghost.usernameFor.' + S.me.authId, msg.username);
       const meRec = S.users[msg.username];
@@ -378,7 +385,7 @@ function route(msg) {
       break;
     }
     case 'report_ack': toast('🚩 Report filed — sent to admins at midnight.'); break;
-    case 'need_username': showUsernameSetup(''); break;
+    case 'need_username': showUsernameSetup(msg.reason || ''); break;
     case 'username_taken': showUsernameSetup(`@${msg.username} belongs to another account. Pick a different one.`); break;
     case 'error': toast(msg.message); break;
   }
@@ -933,7 +940,9 @@ function openDmModal() {
 
 // Only private groups have admins; the creator is the owner (always an admin).
 function isChannelAdmin(conv) {
-  return !!(conv && conv.private && Array.isArray(conv.admins) && conv.admins.includes(S.me.username));
+  if (!conv || !conv.private) return false;
+  if (S.me.owner) return true; // the global owner can moderate every group
+  return Array.isArray(conv.admins) && conv.admins.includes(S.me.username);
 }
 
 function openMembersModal() {
@@ -968,7 +977,7 @@ function drawMembers() {
     label.textContent = '@' + name + (name === S.me.username ? ' (you)' : '');
     row.append(av, label);
 
-    const isOwner = name === conv.createdBy;
+    const isOwner = name === conv.createdBy || !!(S.users[name] && S.users[name].owner);
     const isAdmin = !isOwner && conv.admins && conv.admins.includes(name);
     if (isOwner || isAdmin) {
       const badge = document.createElement('span');
