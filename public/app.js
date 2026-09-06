@@ -1209,6 +1209,12 @@ function wireFirebaseUi() {
       authId: u.uid, email: u.email || '', displayName: u.displayName || '',
       mode: 'firebase', username: null, color: pickedColor,
     };
+    // Stamp the persistent session the instant Firebase login succeeds — even
+    // before the username is chosen — so a refresh at ANY point after sign-in
+    // resumes (to the app, or to username-setup) instead of the login screen.
+    ls.set('ghost.session', JSON.stringify({
+      authId: u.uid, mode: 'firebase', email: u.email || '', displayName: u.displayName || '',
+    }));
     afterAuth();
   };
 

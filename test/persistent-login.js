@@ -169,6 +169,27 @@ function dumpLS(window) {
     dom.window.close();
   }
 
+  /* --------- Phase D: firebase session stamped at login, pre-username --------- */
+  console.log('phase D: firebase login stamped session before username -> refresh goes to setup, not login');
+  {
+    const fbUid = 'fbuid2-' + Math.random().toString(36).slice(2, 10);
+    // Exactly what success() writes the instant Google sign-in succeeds, before
+    // any username is chosen: a session marker but NO usernameFor yet.
+    const seed = {
+      'ghost.session': JSON.stringify({ authId: fbUid, mode: 'firebase', email: 'y@example.com', displayName: 'Jane Doe' }),
+      ['ghost.colorFor.' + fbUid]: '#4f8cff',
+    };
+    const dom = await bootPage(seed);
+    const { window } = dom;
+    const vis = (s) => { const el = window.document.querySelector(s); return !!el && !el.classList.contains('hidden'); };
+
+    await wait(2500);
+    ok(!vis('#login'), 'pre-username firebase refresh: login screen NOT shown');
+    ok(vis('#username-setup'), 'pre-username firebase refresh: username-setup shown (resumed, not bounced to login)');
+    ok(!vis('#app'), 'pre-username firebase refresh: app not shown yet (no username)');
+    dom.window.close();
+  }
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })().catch((e) => { console.error('HARNESS ERROR:', e); process.exit(1); });
