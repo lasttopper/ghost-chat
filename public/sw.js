@@ -6,7 +6,7 @@
  */
 'use strict';
 
-const CACHE = 'ghost-chat-v3';
+const CACHE = 'ghost-chat-v4';
 const SHELL = [
   './',
   './index.html',

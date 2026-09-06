@@ -1071,6 +1071,18 @@ function loadOfflineCache() {
 }
 
 function enterApp() {
+  // Persistent login: stamp a durable session marker every time we enter the
+  // app. It is cleared ONLY by the manual Sign-out button, so a page refresh
+  // (or browser reopen) resumes straight into the chat instead of the login
+  // screen — no flash, no waiting on the Firebase SDK.
+  if (S.me && S.me.authId) {
+    ls.set('ghost.session', JSON.stringify({
+      authId: S.me.authId,
+      mode: S.me.mode,
+      email: S.me.email || '',
+      displayName: S.me.displayName || '',
+    }));
+  }
   hideAllScreens();
   $('#app').classList.remove('hidden');
   renderMe();
@@ -1353,33 +1365,57 @@ async function boot() {
     afterAuth();
   };
 
-  /* Show the login screen IMMEDIATELY (guest mode) — never block first paint
-   * on a CDN import. When the Firebase SDK arrives, the sign-in form appears;
-   * if it never arrives (blocked/slow network), guest mode keeps working.
-   * Returning guests skip the login screen entirely — invite links then drop
-   * them straight into the group. */
-  const savedGuestId = ls.get('ghost.guestId');
-  const savedGuestName = savedGuestId && ls.get('ghost.usernameFor.' + savedGuestId);
+  /* Persistent login: a durable session marker is stamped every time the user
+   * enters the app and cleared ONLY by the manual Sign-out button. If it is
+   * present, resume straight into the chat - a refresh must never bounce the
+   * user back to the login screen or make them wait for the Firebase SDK. */
   if (parseJoinCode()) $('#invite-banner').classList.remove('hidden');
-  if (savedGuestName) {
-    S.me = {
-      authId: savedGuestId, email: '', displayName: '', mode: 'guest', username: null,
-      color: ls.get('ghost.colorFor.' + savedGuestId) || pickedColor,
-    };
-    afterAuth();
-  } else {
-    showLogin();
+  let resumed = false;
+  const sessionRaw = ls.get('ghost.session');
+  if (sessionRaw) {
+    let sess = null;
+    try { sess = JSON.parse(sessionRaw); } catch {}
+    if (sess && sess.authId) {
+      S.me = {
+        authId: sess.authId, email: sess.email || '', displayName: sess.displayName || '',
+        mode: sess.mode || 'guest', username: null,
+        color: ls.get('ghost.colorFor.' + sess.authId) || pickedColor,
+      };
+      resumed = true;
+      afterAuth(); // known username -> enter app immediately; server confirms
+    }
+  }
+
+  /* Fallback for sessions that predate the marker: resume from the stored
+   * guest identity, else show the login screen IMMEDIATELY (guest mode) -
+   * never block first paint on a CDN import. When the Firebase SDK arrives,
+   * the sign-in form appears; if it never arrives (blocked/slow network),
+   * guest mode keeps working. Returning guests skip the login screen
+   * entirely - invite links then drop them straight into the group. */
+  if (!resumed) {
+    const savedGuestId = ls.get('ghost.guestId');
+    const savedGuestName = savedGuestId && ls.get('ghost.usernameFor.' + savedGuestId);
+    if (savedGuestName) {
+      S.me = {
+        authId: savedGuestId, email: '', displayName: '', mode: 'guest', username: null,
+        color: ls.get('ghost.colorFor.' + savedGuestId) || pickedColor,
+      };
+      afterAuth();
+    } else {
+      showLogin();
+    }
   }
   loadFirebase().then((fb) => {
-    if (!fb || S.me) return;
-    S.fb = fb;
+    if (!fb) return;
+    S.fb = fb; // keep the handle: the Sign-out button uses it
+    if (S.me) return; // already resumed from the persistent session - done
     wireFirebaseUi();
     const fbSection = $('#auth-firebase');
     const guestNote = $('#auth-guest-note');
     fbSection.classList.remove('hidden');
     if (fb.emulator) {
       guestNote.innerHTML = '';
-      guestNote.append(document.createTextNode('🧪 Connected to the local Firebase Auth emulator (demo-ghost-chat). Accounts are temporary.'));
+      guestNote.append(document.createTextNode('\u{1F512} Connected to the local Firebase Auth emulator (demo-ghost-chat). Accounts are temporary.'));
     } else {
       guestNote.classList.add('hidden');
     }
