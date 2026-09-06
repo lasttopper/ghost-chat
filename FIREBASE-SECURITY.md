@@ -9,10 +9,46 @@ your own backend** (the Render server), not in Firebase. That means:
   `storage.rules` are **default-deny** guards: if you ever enable those
   services, they start locked (nothing readable/writable) until you write rules
   on purpose.
-- The real security surface is **Firebase Auth configuration** + the fact that
-  the backend trusts the `uid`. The checklist below is what actually matters.
+- The real security surface is **Firebase Auth configuration** + how the backend
+  proves who a user is. The backend now verifies a Firebase **ID token** on every
+  signed-in connection (see §0 below), so the `uid` / `email` it acts on are
+  cryptographically proven — not merely client-claimed. The checklist below is
+  what actually matters.
 
 Project: **ghost-7ed67** (web app id `1:67898464798:web:83b0dbe6d6f847c5ee6c0f`).
+
+---
+
+## 0. Server-side ID-token verification (implemented)
+
+Ownership and account binding are **unspoofable** because the server verifies a
+Firebase ID token instead of trusting client-supplied values.
+
+- When a signed-in client connects, it attaches its Firebase **ID token**
+  (`getIdToken(user)`) to the `join` message.
+- The server (`verify-id-token.js`) verifies it with **zero external
+  dependencies**: it fetches Google's securetoken X.509 certificates, checks the
+  RS256 signature, and validates `aud` / `iss` / `exp` / `iat` against the
+  project. Only then does it trust the token's `sub` (uid) and `email`.
+- The **owner** account (`OWNER_EMAIL`, default `rajkatrina90@gmail.com`) is
+  granted **only** when a *verified* token carries that email. A client that
+  merely *claims* the owner email with no valid token is treated as an
+  unverified guest: it never becomes owner, cannot take a reserved name, and its
+  claimed email is discarded.
+- Connections **without** a token (guests, or a signed-in user whose token could
+  not be fetched) are **unverified**: they keep their username for continuity but
+  can never be owner or gain any verified privilege.
+- Verified identity is re-derived on **every** join (never persisted as a trust
+  flag), so a wiped or renamed account cannot keep stale privileges.
+
+Config: `FIREBASE_PROJECT_ID` (defaults to `ghost-7ed67`) must match the client's
+Firebase project, or token `aud`/`iss` checks fail. The outbound call to
+`googleapis.com` for certificates is cached per Google's `Cache-Control`.
+
+Tests: `test/verify-id-token.js` (signature/claim accept+reject against a real
+openssl-generated cert, plus a live Google-cert parse check) and
+`test/secure-auth.js` (owner via verified token, email-spoof blocked, invalid
+token refused, no privilege escalation).
 
 ---
 

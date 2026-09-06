@@ -237,13 +237,25 @@ function connect() {
   // force it closed so onclose fires and the retry loop keeps trying — the UI
   // must never sit on "connecting…" forever.
   S.openTimer = setTimeout(() => { try { if (S.ws && S.ws.readyState !== 1) S.ws.close(); } catch {} }, 10000);
-  S.ws.onopen = () => {
+  S.ws.onopen = async () => {
     clearTimeout(S.openTimer);
     S.reconnectDelay = 1000;
     $('#reconnect-banner').classList.add('hidden');
+    // Attach a Firebase ID token when signed in so the server can VERIFY our
+    // identity (uid + email) cryptographically instead of trusting client values.
+    // Guests have no token and join unverified (never the owner).
+    let idToken = '';
+    try {
+      if (S.fb && S.fb.authMod) {
+        const u = S.fb.authMod.currentUser(S.fb.auth);
+        if (u) idToken = await S.fb.authMod.getIdToken(u);
+      }
+    } catch {}
+    if (!S.ws || S.ws.readyState !== 1) return; // socket changed while fetching the token
     send({
       type: 'join', username: S.me.username, authId: S.me.authId,
       email: S.me.email, displayName: S.me.displayName, color: S.me.color,
+      idToken,
     });
   };
   S.ws.onmessage = (ev) => {
@@ -387,6 +399,15 @@ function route(msg) {
     case 'report_ack': toast('🚩 Report filed — sent to admins at midnight.'); break;
     case 'need_username': showUsernameSetup(msg.reason || ''); break;
     case 'username_taken': showUsernameSetup(`@${msg.username} belongs to another account. Pick a different one.`); break;
+    case 'auth_failed':
+      // The server could not verify this session's identity. Drop the stored
+      // session and require a fresh sign-in (never silently trust it again).
+      toast(msg.message || 'Please sign in again.');
+      ls.del('ghost.session');
+      if (S.fb && S.fb.authMod) { try { S.fb.authMod.signOut(S.fb.auth); } catch {} }
+      S.me = null;
+      showLogin();
+      break;
     case 'error': toast(msg.message); break;
   }
   // keep the offline preview mirror fresh (typing events are too noisy)

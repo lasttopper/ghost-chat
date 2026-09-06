@@ -145,7 +145,11 @@ const newInviteCode = () => crypto.randomBytes(6).toString('base64url'); // ~8 c
 
 /* ------------------------------- core ------------------------------- */
 
-function createCore(persistence) {
+function createCore(persistence, options = {}) {
+  // Server-side Firebase ID-token verifier. Injectable so tests can supply a
+  // fake; the real server uses the cryptographic verifier in verify-id-token.js.
+  const verifyIdToken = options.verifyIdToken || require('./verify-id-token').verifyIdToken;
+
   let state = seedState();
   let nextMessageId = 1;
 
@@ -268,12 +272,15 @@ function createCore(persistence) {
 
   /* ------------------------------ protocol ------------------------------ */
 
-  function completeJoin(ws, username, authId, email, displayName, color) {
+  function completeJoin(ws, username, authId, email, displayName, color, verified) {
     const me = { username, color };
     clients.set(ws, me);
 
     const u = state.users[username] || {};
-    const owner = isOwnerEmail(email) || u.owner === true;
+    // Ownership is granted ONLY on a verified token whose email is the owner's.
+    // It is re-derived on every join (never trusted from stored state), so a
+    // wiped/renamed account cannot keep stale privileges.
+    const owner = !!(verified && isOwnerEmail(email));
     state.users[username] = {
       color,
       authId,
@@ -312,8 +319,8 @@ function createCore(persistence) {
       send(ws, { type: 'need_username', reason: 'Username: 3–20 chars, lowercase letters, numbers, underscore.' });
       return null;
     }
-    // Reserved role names are blocked for everyone EXCEPT the owner account.
-    if (RESERVED.has(username) && !isOwnerEmail(msg.email)) {
+    // Reserved role names are blocked for everyone EXCEPT the verified owner.
+    if (RESERVED.has(username) && !(msg.verified && isOwnerEmail(msg.email))) {
       send(ws, { type: 'need_username', reason: 'That username is reserved — please pick another.' });
       return null;
     }
@@ -334,22 +341,45 @@ function createCore(persistence) {
     switch (msg.type) {
       case 'join': {
         const color = sanitizeColor(msg.color);
+        // Establish a TRUSTED identity. A Firebase ID token (if present) is
+        // verified cryptographically; its uid + email become the authoritative
+        // identity — the client-supplied values are never trusted for ownership.
+        // Without a token the connection is UNVERIFIED: it keeps its authId for
+        // username continuity but can never be the owner or gain any privilege.
+        let authId, email = '', verified = false;
+        if (msg.idToken) {
+          try {
+            const v = await verifyIdToken(String(msg.idToken));
+            authId = v.uid;
+            email = v.email || '';
+            verified = true;
+          } catch (e) {
+            send(ws, { type: 'auth_failed', message: "We couldn't verify your sign-in. Please sign in again." });
+            return;
+          }
+        } else {
+          // No token: this connection is UNVERIFIED. We keep the client's authId
+          // for username continuity (guests + returning clients), but force the
+          // email empty and verified=false — so it can never be the owner or
+          // gain any verified privilege, no matter what it claims.
+          authId = String(msg.authId || '');
+        }
+
         let rawName = String(msg.username || '').toLowerCase().trim();
         // Returning user without a locally-remembered name: resolve the
-        // username attached to this auth identity (Firebase uid / guest id),
-        // so logout → login never asks for the username again.
-        if (!rawName && msg.authId) {
-          const authId = String(msg.authId);
+        // username attached to this (trusted) auth identity, so logout → login
+        // never asks for the username again.
+        if (!rawName && authId) {
           const known = Object.keys(state.users).find((u) => state.users[u].authId === authId);
           if (known) rawName = known;
         }
         if (!rawName) { send(ws, { type: 'need_username' }); return; }
-        const ok = admitUsername(ws, { ...msg, username: rawName });
+        const ok = admitUsername(ws, { ...msg, username: rawName, authId, email, verified });
         if (!ok) return;
         await ready;
         if (saveTimer) await saveNow(); // flush pending writes before clobbering state via reload
         await reload();
-        completeJoin(ws, ok.username, ok.authId, msg.email, msg.displayName, color);
+        completeJoin(ws, ok.username, ok.authId, email, msg.displayName, color, verified);
         break;
       }
 
