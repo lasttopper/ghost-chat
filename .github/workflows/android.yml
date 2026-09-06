@@ -49,15 +49,18 @@ jobs:
             exit 1
           fi
 
-      - name: Build signed release APK
+      - name: Build signed release APK + AAB
         working-directory: android
         env:
           GHOST_KEYSTORE_PASSWORD: ${{ secrets.TWA_KEYSTORE_PASSWORD }}
           GHOST_KEY_PASSWORD: ${{ secrets.TWA_KEY_PASSWORD }}
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          gradle assembleRelease bundleRelease --no-daemon --stacktrace
 
-      - name: Upload APK
+      - name: Upload APK + AAB
         uses: actions/upload-artifact@v4
         with:
           name: ghost-chat-android-apk
-          path: android/app/build/outputs/apk/release/*.apk
+          path: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/bundle/release/*.aab
