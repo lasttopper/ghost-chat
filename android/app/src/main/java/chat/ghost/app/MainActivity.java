@@ -350,8 +350,9 @@ public class MainActivity extends Activity {
         /** Async: native fetches a fresh ID token, then calls window.__ghostIdToken(tok). */
         @JavascriptInterface
         public void requestFirebaseIdToken() {
-            final FirebaseUser u;
-            try { u = FirebaseAuth.getInstance().getCurrentUser(); } catch (Throwable t) { u = null; }
+            FirebaseUser current = null;
+            try { current = FirebaseAuth.getInstance().getCurrentUser(); } catch (Throwable ignored) {}
+            final FirebaseUser u = current; // effectively-final copy for the lambda
             if (u == null) { evalGhostIdToken(""); return; }
             u.getIdToken(false).addOnCompleteListener(task -> {
                 String tok = "";
