@@ -921,3 +921,33 @@ body.nav-open .nav-backdrop { opacity: 1; pointer-events: auto; }
   border-radius: 6px; width: 28px; height: 28px; cursor: pointer; line-height: 1;
 }
 .attach-meta button:hover { background: var(--panel); }
+
+/* ---- in-app update banner (APK) ---- */
+#update-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 4000;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(90deg, #6d5efc, #8b5cf6);
+  color: #fff;
+  font-size: 13px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  animation: slide-down 0.25s ease-out;
+}
+#update-banner span { flex: 1; min-width: 0; }
+#update-banner button {
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+#update-now { background: #fff; color: #5b4bd6; }
+#update-now:disabled { opacity: 0.7; cursor: default; }
+#update-later { background: rgba(255, 255, 255, 0.18); color: #fff; }
+@keyframes slide-down { from { transform: translateY(-100%); } to { transform: translateY(0); } }

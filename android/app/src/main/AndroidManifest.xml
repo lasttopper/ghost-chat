@@ -8,6 +8,9 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <!-- Native message notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- In-app auto update: hand the freshly downloaded APK to the system
+         installer (Android still asks the user to confirm every install) -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- Persistent "active" notification (KeepAliveService) keeps the chat
          connection alive while the app is backgrounded -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />

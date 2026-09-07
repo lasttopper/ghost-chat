@@ -125,6 +125,7 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (req.method === 'POST' && pathname === '/api/upload-image') { handleImageUpload(req, res); return; }
+  if (req.method === 'GET' && pathname === '/api/update-check') { handleUpdateCheck(req, res); return; }
   if (pathname === '/') pathname = '/index.html';
   const filePath = path.normalize(path.join(PUBLIC_DIR, pathname));
   if (!filePath.startsWith(PUBLIC_DIR + path.sep) && filePath !== PUBLIC_DIR) {
@@ -138,6 +139,43 @@ const server = http.createServer((req, res) => {
     }).end(data);
   });
 });
+
+/* --------------------------- in-app update check ---------------------------
+ * The APK asks the server which release is current. We read the latest GitHub
+ * release (cached 15 min) and hand back the version + APK download URL, so a
+ * full auto-update needs no app-store round trip. On any failure we answer
+ * "no update" — a broken check must never nag or block the chat. */
+
+const UPDATE_CHECK_URL = process.env.UPDATE_CHECK_URL
+  || `https://api.github.com/repos/${process.env.UPDATE_REPO || 'lasttopper/ghost-chat'}/releases/latest`;
+const UPDATE_CACHE_MS = 15 * 60 * 1000;
+let updateCache = { at: 0, data: null };
+
+async function handleUpdateCheck(req, res) {
+  const send = (obj) => res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+    .end(JSON.stringify(obj));
+  if (updateCache.data && Date.now() - updateCache.at < UPDATE_CACHE_MS) { send(updateCache.data); return; }
+  try {
+    const r = await fetch(UPDATE_CHECK_URL, {
+      headers: { 'User-Agent': 'ghost-chat-app', Accept: 'application/vnd.github+json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) throw new Error('releases API ' + r.status);
+    const rel = await r.json();
+    const tag = String(rel.tag_name || '').replace(/^v/, '');
+    const apk = (Array.isArray(rel.assets) ? rel.assets : []).find((a) => /\.apk$/i.test(String(a && a.name)));
+    const data = {
+      ok: true,
+      latest: tag || null,
+      url: (apk && apk.browser_download_url) || null,
+      notes: String(rel.body || '').slice(0, 500),
+    };
+    if (data.latest && data.url) updateCache = { at: Date.now(), data };
+    send(data);
+  } catch {
+    send(updateCache.data || { ok: true, latest: null, url: null }); // stale or "no update"
+  }
+}
 
 /* ------------------------------ image upload ------------------------------
  * Chat image sharing is hosted on ImgBB. The client downscales its picture

@@ -419,6 +419,7 @@ function route(msg) {
         ls.set('ghost.colorFor.' + S.me.authId, meRec.color);
       }
       renderMe();
+      if (!updateChecked) { updateChecked = true; checkForAppUpdate(); }
       for (const conv of [...S.channels, ...S.dms]) {
         if (!(conv.id in lastRead)) lastRead[conv.id] = S.serverNow;
         if (!S.typing[conv.id]) S.typing[conv.id] = new Map();
@@ -1794,6 +1795,60 @@ function submitUsername() {
   enterApp();
 }
 
+/* --------------------------- in-app auto update (APK) ---------------------------
+ * The APK is a thin shell around this live web app, so even an OLD apk runs
+ * the newest update-check code. When GitHub has a newer release, we show a
+ * banner; "Update now" hands the APK URL to the native downloader (new
+ * shells) or opens it in the system browser (old shells without the bridge). */
+
+const cmpVer = (a, b) => {
+  const pa = String(a || '0').split('.').map(Number), pb = String(b || '0').split('.').map(Number);
+  for (let i = 0; i < 3; i++) { const d = (pa[i] || 0) - (pb[i] || 0); if (d) return d; }
+  return 0;
+};
+
+let updateChecked = false;
+async function checkForAppUpdate() {
+  if (!isNativeApp()) return; // browser/PWA users get updates instantly anyway
+  try {
+    const cur = String((window.AndroidBridge && window.AndroidBridge.getAppVersion && window.AndroidBridge.getAppVersion()) || '0');
+    const r = await fetch('/api/update-check', { cache: 'no-store' });
+    const info = await r.json();
+    if (!info || !info.latest || !info.url) return;
+    if (cmpVer(info.latest, cur) <= 0) return;
+    if (ls.get('ghost.skipUpdate') === info.latest) return; // dismissed this exact version
+    showUpdateBanner(info, cur);
+  } catch {}
+}
+
+function showUpdateBanner(info, cur) {
+  if (document.getElementById('update-banner')) return;
+  const bar = document.createElement('div');
+  bar.id = 'update-banner';
+  const msg = document.createElement('span');
+  msg.textContent = `\u{1F389} Update v${info.latest} is available (you're on v${cur})`;
+  const now = document.createElement('button');
+  now.id = 'update-now';
+  now.textContent = 'Update now';
+  now.onclick = () => {
+    now.disabled = true;
+    now.textContent = 'Downloading\u2026';
+    try {
+      if (window.AndroidBridge && window.AndroidBridge.downloadAndInstallApk) {
+        window.AndroidBridge.downloadAndInstallApk(info.url); // native download + install prompt
+      } else {
+        window.open(info.url, '_blank'); // older shell: fetch it in the browser
+      }
+    } catch { window.open(info.url, '_blank'); }
+  };
+  const later = document.createElement('button');
+  later.id = 'update-later';
+  later.textContent = 'Later';
+  later.onclick = () => { ls.set('ghost.skipUpdate', info.latest); bar.remove(); };
+  bar.appendChild(msg); bar.appendChild(now); bar.appendChild(later);
+  document.body.appendChild(bar);
+}
+
 /* ------------------------------ offline preview ------------------------------
  * The last conversations are mirrored into localStorage so the app can show
  * previously seen content with no connection (Play Store reviewers + planes).
@@ -2123,6 +2178,7 @@ async function boot() {
 
   /* shared wiring */
   $('#send-btn').onclick = sendMessage;
+  setInterval(() => checkForAppUpdate(), 6 * 60 * 60 * 1000); // keep the APK fresh
   $('#emoji-btn').onclick = (e) => openPicker(e.currentTarget, { mode: 'composer' });
   $('#image-btn').onclick = () => $('#image-file').click();
   $('#image-file').onchange = (e) => {

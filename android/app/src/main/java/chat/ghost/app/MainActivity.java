@@ -2,8 +2,13 @@ package chat.ghost.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.DownloadManager;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
+import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.os.Environment;
 import android.content.pm.PackageManager;
 import android.database.ContentObserver;
 import android.database.Cursor;
@@ -339,7 +344,58 @@ public class MainActivity extends Activity {
         public boolean isNative() { return true; }
 
         @JavascriptInterface
-        public String getAppVersion() { return "2.6.0"; }
+        public String getAppVersion() { return "2.7.0"; }
+
+        /* In-app auto update: the web layer compares getAppVersion() with the
+         * latest GitHub release (via /api/update-check) and passes the APK url
+         * here. We download to app-specific storage with DownloadManager (its
+         * notification doubles as progress) and then hand the finished file to
+         * the system installer. Android shows its own "install this app?"
+         * confirmation - we never install silently. */
+        @JavascriptInterface
+        public void downloadAndInstallApk(final String url) {
+            if (url == null || !url.startsWith("https://")) return;
+            runOnUiThread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        final DownloadManager dm =
+                            (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                        if (dm == null) return;
+                        DownloadManager.Request req =
+                            new DownloadManager.Request(Uri.parse(url));
+                        req.setTitle("Ghost Chat update");
+                        req.setDescription("Downloading the new version");
+                        req.setMimeType("application/vnd.android.package-archive");
+                        req.setNotificationVisibility(
+                            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                        req.setDestinationInExternalFilesDir(MainActivity.this,
+                            Environment.DIRECTORY_DOWNLOADS, "ghost-chat-update.apk");
+                        final long id = dm.enqueue(req);
+                        registerReceiver(new BroadcastReceiver() {
+                            @Override
+                            public void onReceive(Context ctx, Intent intent) {
+                                long done = intent.getLongExtra(
+                                    DownloadManager.EXTRA_DOWNLOAD_ID, -1L);
+                                if (done != id) return;
+                                try { ctx.unregisterReceiver(this); } catch (Exception ignored) {}
+                                Uri file = dm.getUriForDownloadedFile(id);
+                                if (file == null) return;
+                                Intent install = new Intent(Intent.ACTION_VIEW);
+                                install.setDataAndType(file,
+                                    "application/vnd.android.package-archive");
+                                install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                    | Intent.FLAG_ACTIVITY_NEW_TASK);
+                                try { ctx.startActivity(install); } catch (Exception ignored) {}
+                            }
+                        }, new IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE));
+                    } catch (Exception ignored) {
+                        // download unavailable (no storage / blocked) - the web
+                        // layer falls back to opening the url in a browser
+                    }
+                }
+            });
+        }
 
         /** Raise the persistent foreground notification (keeps the app alive). */
         @JavascriptInterface
