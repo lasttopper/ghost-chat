@@ -41,33 +41,55 @@ const rtdb = createRtdb({
   projectId: process.env.FIREBASE_PROJECT_ID || undefined,
   baseUrl: process.env.FIREBASE_RTDB_URL || undefined,     // test hook
   tokenUrl: process.env.FIREBASE_OAUTH_URL || undefined,   // test hook
+  timeoutMs: process.env.FIREBASE_RTDB_TIMEOUT_MS ? Number(process.env.FIREBASE_RTDB_TIMEOUT_MS) : undefined,
 });
 if (rtdb.enabled) console.log('RTDB durable storage enabled:', rtdb.url);
 else console.log('RTDB disabled (no service account) - state is file-only and will NOT survive redeploys');
 
 let rtdbFailing = false;
+/* Single-process server: the in-memory state is authoritative once booted.
+ * load() therefore does the RTDB dance ONLY at startup (core calls it again
+ * on joins via reload(); answering null there keeps joins fast and offline-
+ * proof — a stalled RTDB socket can never block a join again). */
+let startupLoadDone = false;
 const persistence = {
   async load() {
-    if (rtdb.enabled) {
-      try {
-        const remote = await rtdb.loadState();
-        if (remote && remote.users) return remote;
-      } catch (e) { console.error('RTDB load failed (falling back to file):', e.message); }
+    if (startupLoadDone) return null; // reload() on join: keep in-memory state
+    try {
+      if (rtdb.enabled) {
+        for (let i = 0; i < 3; i++) {
+          try {
+            const remote = await rtdb.loadState();
+            if (remote && remote.users) return remote;
+            break; // RTDB reachable but empty -> fall through to file/seed
+          } catch (e) {
+            console.error(`RTDB load attempt ${i + 1}/3 failed:`, e.message);
+            if (i < 2) await new Promise((r) => setTimeout(r, 1500 * (i + 1)));
+          }
+        }
+      }
+      try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch { return null; }
+    } finally {
+      startupLoadDone = true;
     }
-    try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch { return null; }
   },
   async save(state) {
     try { await fs.promises.writeFile(DATA_FILE, JSON.stringify(state)); } catch {}
     if (!rtdb.enabled) return;
-    try {
-      await rtdb.saveState(state);
-      if (rtdbFailing) { rtdbFailing = false; console.log('RTDB writes recovered'); }
-    } catch (e) {
-      if (!rtdbFailing) { rtdbFailing = true; console.error('RTDB save failed (file copy written):', e.message); }
-    }
+    // Fire-and-forget through a serial chain: never blocks callers (joins!),
+    // preserves write order, and surfaces outages once instead of per-save.
+    rtdbChain = rtdbChain
+      .then(() => rtdb.saveState(state))
+      .then(() => {
+        if (rtdbFailing) { rtdbFailing = false; console.log('RTDB writes recovered'); }
+      })
+      .catch((e) => {
+        if (!rtdbFailing) { rtdbFailing = true; console.error('RTDB save failed (file copy written):', e.message); }
+      });
   },
   saveSync(state) { try { fs.writeFileSync(DATA_FILE, JSON.stringify(state)); } catch {} },
 };
+let rtdbChain = Promise.resolve();
 
 /* FCM push for offline Android users. Enabled only when the Firebase
  * service-account JSON is provided (Render env FIREBASE_SERVICE_ACCOUNT).
@@ -197,7 +219,10 @@ async function shutdown() {
   shuttingDown = true;
   core.flush();
   if (rtdb.enabled) {
-    try { await rtdb.saveState(core.getState()); } catch (e) { console.error('final RTDB save failed:', e.message); }
+    try {
+      await rtdbChain; // let queued writes land first (order preserved)
+      await rtdb.saveState(core.getState());
+    } catch (e) { console.error('final RTDB save failed:', e.message); }
   }
   process.exit(0);
 }

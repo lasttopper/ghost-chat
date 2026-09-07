@@ -185,6 +185,86 @@ const SA = fakeServiceAccount();
     'a NEW server instance (empty disk) restores the chat from RTDB');
 
   srv2.kill('SIGTERM');
+  await wait(300);
+
+  /* ---------------- Part C: RTDB-stripped state heals ---------------- */
+  // This is EXACTLY what RTDB does to saved state: empty arrays/objects and
+  // nulls vanish. #random loses `messages`, the message loses `reactions`,
+  // and `dms`/`reports` disappear entirely. A client receiving this raw
+  // crashes while rendering -> "stuck on connecting".
+  for (const k of Object.keys(store)) delete store[k];
+  store['/ghost-state'] = {
+    users: { ghostbot: { color: '#8b5cf6', authId: 'system:ghostbot', bot: true, displayName: 'GhostBot', createdAt: 1 } },
+    channels: [
+      { id: 'general', name: 'general', type: 'channel', private: false, inviteCode: null, members: [], createdBy: 'system', topic: 't', createdAt: 1,
+        messages: [{ id: 'm1', channel: 'general', username: 'system', color: '', ts: 1, system: true, text: 'hi' }] },
+      { id: 'random', name: 'random', type: 'channel', private: false, inviteCode: null, createdBy: 'system', topic: 't', createdAt: 1 }, // messages stripped!
+    ],
+    nextMessageId: 9,
+  };
+  const P3 = 3983;
+  const srv3 = await boot(P3, 'c');
+  const init3 = await wsJoinMsg(P3, 'heal_qa', 'auth-heal-1', null);
+  const initC = init3.find((e) => e.type === 'init');
+  ok(!!initC, 'server boots and serves init from RTDB-stripped state');
+  const chans = (initC && initC.channels) || [];
+  ok(chans.length === 2 && chans.every((c) => Array.isArray(c.messages)),
+    'every conversation in init has a messages array (stripped ones healed)');
+  ok(Array.isArray(initC && initC.dms) && Array.isArray(initC && initC.reports === undefined ? [] : initC.dms),
+    'init dms array present');
+  // post into the channel that lost its messages array (server-side push)
+  const healEcho = await new Promise((resolve) => {
+    const ws = new WebSocket('ws://127.0.0.1:' + P3 + '/ws');
+    ws.on('open', () => ws.send(JSON.stringify({ type: 'join', username: '', authId: 'auth-heal-1', color: '#f43f5e' })));
+    ws.on('message', (d) => {
+      const m = JSON.parse(d);
+      if (m.type === 'init') ws.send(JSON.stringify({ type: 'message', channel: 'random', text: 'into-the-healed-channel' }));
+      if (m.type === 'message' && m.message.text === 'into-the-healed-channel') { ws.close(); resolve(m); }
+    });
+    setTimeout(() => { try { ws.close(); } catch {} resolve(null); }, 8000);
+  });
+  ok(!!healEcho && !!healEcho.message.reactions, 'message posts into the healed channel and carries reactions');
+  srv3.kill('SIGTERM');
+  await wait(300);
+
+  /* ---------------- Part D: a HANGING RTDB must never block boot/join ---- */
+  const hang = http.createServer(() => { /* accepts, never responds */ });
+  await new Promise((r) => hang.listen(0, '127.0.0.1', r));
+  const hangBase = 'http://127.0.0.1:' + hang.address().port;
+  const P4 = 3984;
+  const dirD = fs.mkdtempSync(path.join(os.tmpdir(), 'rtdb-hang-'));
+  const t0 = Date.now();
+  const srv4 = await new Promise((resolve) => {
+    const srv = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
+      env: {
+        ...process.env, PORT: String(P4), GHOST_DATA: path.join(dirD, 'data.json'),
+        FIREBASE_SERVICE_ACCOUNT: SA,
+        FIREBASE_RTDB_URL: hangBase, FIREBASE_OAUTH_URL: hangBase + '/token',
+        FIREBASE_RTDB_TIMEOUT_MS: '700',
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const tryIt = (tries) => {
+      const sock = require('net').connect(P4, '127.0.0.1', () => { sock.destroy(); resolve(srv); });
+      sock.on('error', () => { sock.destroy(); tries > 0 ? setTimeout(() => tryIt(tries - 1), 200) : resolve(srv); });
+    };
+    tryIt(120);
+  });
+  const bootMs = Date.now() - t0;
+  ok(bootMs < 20000, `server still boots while RTDB hangs (${(bootMs / 1000).toFixed(1)}s, timeouts+retries bounded)`);
+  // Let the bounded startup retries finish (3 x 700ms timeout + 1.5s + 3s
+  // backoff). The FIRST join may wait on that one-time load; every join after
+  // ready must be network-free.
+  await wait(7000);
+  const tJoin = Date.now();
+  const initD = await wsJoinMsg(P4, 'hang_qa', 'auth-hang-1', 'works-during-outage');
+  const joinMs = Date.now() - tJoin;
+  const initM = initD.find((e) => e.type === 'init');
+  const echoed = initD.some((e) => e.type === 'message' && e.message.text === 'works-during-outage');
+  ok(!!initM && joinMs < 5000, `join completes fast while RTDB hangs (${joinMs}ms - no network in join path)`);
+  ok(echoed, 'chat fully works during an RTDB outage (file-only fallback)');
+  srv4.kill('SIGTERM');
+  hang.close();
   mock.close();
   await wait(150);
 

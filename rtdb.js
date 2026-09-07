@@ -27,6 +27,9 @@ function createRtdb(options = {}) {
   const projectId = options.projectId || sa.project_id;
   const baseUrl = (options.baseUrl || `https://${projectId}-default-rtdb.firebaseio.com`).replace(/\/+$/, '');
   const tokenUrl = options.tokenUrl || 'https://oauth2.googleapis.com/token';
+  // Hard timeouts: Node's fetch never times out on its own, and a stalled
+  // socket must never be able to block startup or a save forever.
+  const TIMEOUT_MS = options.timeoutMs || 15000;
   const STATE_KEY = options.stateKey || 'ghost-state';
   const BACKUP_KEY = options.backupKey || 'ghost-backups';
   const KEEP_BACKUPS_DAYS = options.keepBackupsDays || 14;
@@ -54,6 +57,7 @@ function createRtdb(options = {}) {
         grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
         assertion: signedJwt(),
       }),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
     });
     const j = await r.json().catch(() => ({}));
     if (!j.access_token) throw new Error('token exchange failed: ' + (j.error_description || j.error || r.status));
@@ -72,7 +76,7 @@ function createRtdb(options = {}) {
           headers['Content-Type'] = 'application/json';
           init.body = JSON.stringify(bodyObj);
         }
-        const r = await fetch(baseUrl + path, init);
+        const r = await fetch(baseUrl + path, { ...init, signal: AbortSignal.timeout(TIMEOUT_MS) });
         const text = await r.text();
         if (r.status === 401 && attempt === 0) continue; // token went stale mid-flight
         if (!r.ok) throw new Error(`RTDB ${method} ${path} -> HTTP ${r.status}: ${text.slice(0, 120)}`);

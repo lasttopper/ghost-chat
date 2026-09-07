@@ -404,8 +404,8 @@ const send = (obj) => {
 function route(msg) {
   switch (msg.type) {
     case 'init': {
-      S.channels = msg.channels || [];
-      S.dms = msg.dms || [];
+      S.channels = healConvs(msg.channels);
+      S.dms = healConvs(msg.dms);
       S.users = msg.users || {};
       S.online = new Set(msg.online || []);
       S.serverNow = msg.now;
@@ -451,6 +451,7 @@ function route(msg) {
     case 'typing': onTyping(msg, false); break;
     case 'typing_stop': onTyping(msg, true); break;
     case 'channel_created': {
+      healConvs([msg.channel]);
       S.channels.push(msg.channel);
       S.typing[msg.channel.id] = new Map();
       lastRead[msg.channel.id] = S.serverNow; saveLastRead();
@@ -464,7 +465,7 @@ function route(msg) {
       break;
     }
     case 'channel_joined': {
-      if (!S.channels.some((c) => c.id === msg.channel.id)) S.channels.push(msg.channel);
+      if (!S.channels.some((c) => c.id === msg.channel.id)) S.channels.push(healConvs([msg.channel])[0]);
       S.typing[msg.channel.id] = S.typing[msg.channel.id] || new Map();
       lastRead[msg.channel.id] = S.serverNow; saveLastRead();
       switchConv(msg.channel.id);
@@ -516,6 +517,7 @@ function route(msg) {
     }
     case 'dm_ready': {
       const i = S.dms.findIndex((d) => d.id === msg.conv.id);
+      healConvs([msg.conv]);
       if (i >= 0) S.dms[i] = msg.conv; else S.dms.push(msg.conv);
       S.typing[msg.conv.id] = S.typing[msg.conv.id] || new Map();
       if (!(msg.conv.id in lastRead)) { lastRead[msg.conv.id] = S.serverNow; saveLastRead(); }
@@ -736,6 +738,20 @@ function renderHeader() {
     invite.classList.toggle('hidden', !conv.private);
     members.classList.toggle('hidden', !conv.private);
   }
+}
+
+/* Defensive: never trust a conversation object to carry `messages` (empty
+ * arrays can be lost by storage layers). Heal once at the door instead of
+ * guarding every reader. */
+function healConvs(list) {
+  const out = Array.isArray(list) ? list : [];
+  for (const c of out) {
+    if (!Array.isArray(c.messages)) c.messages = [];
+    for (const m of c.messages) {
+      if (!m.reactions || typeof m.reactions !== 'object') m.reactions = {};
+    }
+  }
+  return out;
 }
 
 function renderMessages() {
@@ -1753,8 +1769,8 @@ function loadOfflineCache() {
   try { cache = JSON.parse(ls.get(OFFLINE_KEY) || 'null'); } catch {}
   if (!cache || !Array.isArray(cache.channels)) return false;
   if (!cache.channels.length && !(cache.dms || []).length) return false;
-  S.channels = cache.channels;
-  S.dms = cache.dms || [];
+  S.channels = healConvs(cache.channels);
+  S.dms = healConvs(cache.dms);
   S.users = cache.users || {};
   S.online = new Set();               // nobody is "online" while offline
   S.serverNow = cache.serverNow || Date.now();

@@ -120,11 +120,19 @@ function normalizeState(s) {
   s.reports = s.reports || [];
   s.nextMessageId = s.nextMessageId || 1;
   if (!('lastDigestDate' in s)) s.lastDigestDate = null;
-  for (const c of s.channels) {
+  // The durable store (Firebase RTDB) cannot represent empty arrays/objects:
+  // "messages": [] and "reactions": {} come back as undefined. Heal every
+  // conversation and message so nothing downstream (or on the client) trips
+  // over a missing field.
+  for (const c of [...s.channels, ...s.dms]) {
     if (!('type' in c)) c.type = 'channel';
     if (!('private' in c)) c.private = false;
     if (!('members' in c)) c.members = [];
     if (!('inviteCode' in c)) c.inviteCode = null;
+    if (!Array.isArray(c.messages)) c.messages = [];
+    for (const m of c.messages) {
+      if (!m.reactions || typeof m.reactions !== 'object') m.reactions = {};
+    }
     // Private groups get an admin list; the creator is always the owner-admin.
     if (c.private) {
       if (!Array.isArray(c.admins)) c.admins = [];
