@@ -30,14 +30,43 @@ const DATA_FILE = process.env.GHOST_DATA || process.env.PULSE_DATA || path.join(
 const REPORT_TZ = process.env.REPORT_TZ || 'Asia/Kolkata';
 const REPORT_DIR = process.env.REPORT_DIR || path.join(__dirname, 'reports');
 
-/* ------------------------------ persistence ------------------------------ */
+/* ------------------------------ persistence ------------------------------
+ * The local file is a fast cache; Firebase Realtime Database is the durable
+ * store (Render's free tier wipes the disk on every deploy, which used to
+ * delete all chats/groups). RTDB wins on load when it has data. */
 
+const { createRtdb } = require('./rtdb');
+const rtdb = createRtdb({
+  serviceAccountJson: process.env.FIREBASE_SERVICE_ACCOUNT || '',
+  projectId: process.env.FIREBASE_PROJECT_ID || undefined,
+  baseUrl: process.env.FIREBASE_RTDB_URL || undefined,     // test hook
+  tokenUrl: process.env.FIREBASE_OAUTH_URL || undefined,   // test hook
+});
+if (rtdb.enabled) console.log('RTDB durable storage enabled:', rtdb.url);
+else console.log('RTDB disabled (no service account) - state is file-only and will NOT survive redeploys');
+
+let rtdbFailing = false;
 const persistence = {
   async load() {
+    if (rtdb.enabled) {
+      try {
+        const remote = await rtdb.loadState();
+        if (remote && remote.users) return remote;
+      } catch (e) { console.error('RTDB load failed (falling back to file):', e.message); }
+    }
     try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8')); } catch { return null; }
   },
-  async save(state) { await fs.promises.writeFile(DATA_FILE, JSON.stringify(state)); },
-  saveSync(state) { fs.writeFileSync(DATA_FILE, JSON.stringify(state)); },
+  async save(state) {
+    try { await fs.promises.writeFile(DATA_FILE, JSON.stringify(state)); } catch {}
+    if (!rtdb.enabled) return;
+    try {
+      await rtdb.saveState(state);
+      if (rtdbFailing) { rtdbFailing = false; console.log('RTDB writes recovered'); }
+    } catch (e) {
+      if (!rtdbFailing) { rtdbFailing = true; console.error('RTDB save failed (file copy written):', e.message); }
+    }
+  },
+  saveSync(state) { try { fs.writeFileSync(DATA_FILE, JSON.stringify(state)); } catch {} },
 };
 
 /* FCM push for offline Android users. Enabled only when the Firebase
@@ -159,8 +188,21 @@ const wss = new WebSocketServer({ server, path: '/ws' });
 wss.on('connection', (ws) => core.onConnection(ws));
 attachHeartbeat(wss);
 
-process.on('SIGTERM', () => { core.flush(); process.exit(0); });
-process.on('SIGINT',  () => { core.flush(); process.exit(0); });
+/* On shutdown (Render sends SIGTERM before every redeploy): flush the file
+ * synchronously, then push the final state to RTDB before exiting so no
+ * messages are lost to the redeploy. */
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  core.flush();
+  if (rtdb.enabled) {
+    try { await rtdb.saveState(core.getState()); } catch (e) { console.error('final RTDB save failed:', e.message); }
+  }
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 /* --------------------------- midnight digest --------------------------- */
 
@@ -181,6 +223,11 @@ function maybeRunDigest() {
   const due = digest.dueDigest(state.lastDigestDate, now, REPORT_TZ);
   if (!due) return;
   core.setLastDigestDate(digest.tzDateStr(now, REPORT_TZ)); // mark before awaiting to avoid double-send
+  // Daily cloud backup of the whole state (kept 14 days in RTDB) so there is
+  // always a restorable snapshot even if the live copy is ever corrupted.
+  if (rtdb.enabled) {
+    rtdb.backupNow(state, due).catch((e) => console.error('[backup] failed:', e.message));
+  }
   digest.runDigest(state, {
     dateStr: due, tz: REPORT_TZ, outDir: REPORT_DIR, telegram: TELEGRAM,
   }).catch((e) => console.error('[digest] failed:', e.message));
