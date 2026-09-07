@@ -99,18 +99,15 @@ function closeDom(dom, st) {
     const $ = (s) => window.document.querySelector(s);
     await waitFor(() => typeof $('#auth-google').onclick === 'function'); // boot wired
     $('#auth-google').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    await waitFor(() => !$('#username-setup').classList.contains('hidden'));
-    ok('Google button starts the native flow and lands on username setup');
-
-    $('#username-input').value = 'guser';
-    $('#username-submit').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await waitFor(() => $('#me-status') && $('#me-status').textContent === 'online');
-    ok('after sign-in the app connects and the server accepts the session');
+    ok('Google button starts the native flow and lands straight in the app');
+
     assert.strictEqual(lastToken, VALID_TOKEN, 'join must carry the bridge Firebase ID token, got: ' + lastToken);
     ok('the join carried the bridge Firebase ID token (server-verified identity)');
     assert($('#app') && !$('#app').classList.contains('hidden'), 'app shell visible');
-    assert(/@guser/.test($('.me-name') ? $('.me-name').textContent : ''), 'signed in as @guser');
-    ok('app shell shows the signed-in user');
+    const meTxt = $('.me-name') ? $('.me-name').textContent : '';
+    assert(/^@user_[a-z0-9]{6}/.test(meTxt), 'signed in with a server-issued handle: ' + meTxt);
+    ok('app shell shows the signed-in user (auto-issued name)');
     closeDom(dom, st);
   } catch (e) { bad('google sign-in flow', e); }
 

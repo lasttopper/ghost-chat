@@ -6,12 +6,12 @@
  */
 'use strict';
 
-const CACHE = 'ghost-chat-v23';
+const CACHE = 'ghost-chat-v24';
 const SHELL = [
   './',
   './index.html',
   './style.css',
-  './app.js?v=23',
+  './app.js?v=24',
   './qrcode.js?v=1',
   './firebase-config.js',
   './backend-config.js',

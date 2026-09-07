@@ -39,6 +39,7 @@ const BOT_GUIDE =
   '• Direct messages — tap ＋ beside “Direct messages”, or anyone in the People list.\n' +
   '• Your @username — 3–20 chars, lowercase letters/numbers/underscore. Role names like “admin” or “owner” are reserved.\n' +
   '• Extras — hover a message to react 😀 or report 🚩.\n' +
+  '• Commands — /rename <new_name> changes your username; /help lists them.\n' +
   'Ask me about: groups, invites, admins, DMs, or usernames.';
 
 // Keyword-routed help for the assistant DM.
@@ -54,8 +55,11 @@ function botReply(rawText) {
   if (has('admin', 'remove', 'kick', 'promote', 'demote', 'member', 'owner')) {
     return 'Group admins manage members from 👥 Members: add people, Remove a member, or Make admin / Demote. The owner (creator) can’t be removed or demoted.';
   }
-  if (has('username', 'name', 'handle', 'change')) {
-    return 'Your @username is 3–20 characters: lowercase letters, numbers and underscores. Role names such as admin, owner, mod, system and ghostbot are reserved and can’t be taken.';
+  if (has('username', 'name', 'handle', 'change', 'rename')) {
+    return 'To change your username, send me: /rename <new_name> — 3–20 characters, lowercase letters, numbers and underscores. Your chat history moves with you. Role names such as admin, owner, mod, system and ghostbot are reserved.';
+  }
+  if (has('commands', 'command', '/')) {
+    return 'Commands you can send me:\n• /rename <new_name> — change your username (history follows you)\n• /help — the full guide\nYou can type them here or in any chat.';
   }
   if (has('dm', 'direct', 'private message', 'message someone')) {
     return 'To DM someone, tap ＋ next to “Direct messages” and pick a person, or tap their name in the People list. DMs are private 1-on-1 chats.';
@@ -247,6 +251,9 @@ function createCore(persistence, options = {}) {
   const getChannel = (id) => state.channels.find((c) => c.id === String(id));
   const getDm = (id) => state.dms.find((d) => d.id === String(id));
   const findConv = (id) => getChannel(id) || getDm(id);
+  // DM ids are opaque and stable (they keep the names from creation time, even
+  // after a rename) — so look existing DMs up by their member pair first.
+  const findDmBetween = (a, b) => state.dms.find((d) => d.type === 'dm' && d.members.length === 2 && d.members.includes(a) && d.members.includes(b));
 
   // null = everyone (public channel); array = only these usernames
   const convMembers = (conv) => (!conv ? null : (conv.type === 'dm' || conv.private) ? conv.members : null);
@@ -321,8 +328,8 @@ function createCore(persistence, options = {}) {
   // Create (exactly once) the assistant DM that welcomes a user with the guide.
   function ensureAssistantDm(username) {
     if (!username || username === BOT) return null;
+    if (findDmBetween(username, BOT)) return null;
     const id = dmIdFor(username, BOT);
-    if (getDm(id)) return null;
     const dm = { id, type: 'dm', members: [username, BOT], createdAt: Date.now(), messages: [] };
     dm.messages.push({
       id: newId(), channel: id, username: BOT, color: BOT_COLOR,
@@ -331,6 +338,79 @@ function createCore(persistence, options = {}) {
     state.dms.push(dm);
     save();
     return dm;
+  }
+
+  const initPayload = (username) => ({
+    type: 'init',
+    username,
+    channels: visibleChannels(username),
+    dms: myDms(username),
+    users: state.users,
+    online: onlineNames(),
+    now: Date.now(),
+    isOwner: state.users[username] && state.users[username].owner === true,
+  });
+
+  /* --------------------------- rename (self-service) --------------------------- */
+
+  /* Rename a user everywhere: profile record, message authorship, memberships,
+   * admin lists, reports, presence, push tokens and live sockets. DM ids stay
+   * stable (opaque keys); clients resolve partners via members[]. */
+  function renameUser(from, to) {
+    if (!from || !to || from === to || !state.users[from] || state.users[to]) return false;
+    state.users[to] = state.users[from];
+    delete state.users[from];
+    for (const ch of state.channels) {
+      for (const m of ch.messages) if (m.username === from) m.username = to;
+      if (Array.isArray(ch.members)) ch.members = ch.members.map((x) => (x === from ? to : x));
+      if (Array.isArray(ch.admins)) ch.admins = ch.admins.map((x) => (x === from ? to : x));
+      if (ch.createdBy === from) ch.createdBy = to;
+    }
+    for (const dm of state.dms) {
+      for (const m of dm.messages) if (m.username === from) m.username = to;
+      dm.members = dm.members.map((x) => (x === from ? to : x));
+    }
+    for (const r of state.reports || []) {
+      if (r.reporter === from) r.reporter = to;
+      if (r.targetUser === from) r.targetUser = to;
+    }
+    if (declared.has(from)) { declared.delete(from); declared.add(to); }
+    const ot = offlineTimers.get(from);
+    if (ot) { offlineTimers.set(to, ot); offlineTimers.delete(from); }
+    const pt = pushTokens.get(from);
+    if (pt) { pushTokens.set(to, pt); pushTokens.delete(from); }
+    for (const c of clients.values()) if (c.username === from) c.username = to;
+    return true;
+  }
+
+  /* Slash commands handled inside the GhostBot DM. Returns the bot's reply
+   * text; /rename applies the change to live state before answering. */
+  function botCommand(text, ws, me, oldName) {
+    const parts = String(text).trim().split(/\s+/);
+    const cmd = parts[0].toLowerCase();
+    if (cmd === '/help') {
+      return 'Commands you can send me:\n• /rename <new_name> — change your username (history follows you)\n• /help — this list\nType them here or in any chat — they always come to me.';
+    }
+    if (cmd === '/rename') {
+      const name = parts.slice(1).join(' ').toLowerCase().trim();
+      const meRec = state.users[me.username] || {};
+      if (!name) return 'Usage: /rename <new_name> — 3–20 characters, lowercase letters, numbers and underscores.';
+      if (!validUsername(name)) return `❌ “${name}” isn’t valid: 3–20 characters, lowercase letters, numbers and underscores only.`;
+      if (RESERVED.has(name) && !meRec.owner) return `❌ “${name}” is a reserved role name — pick another.`;
+      if (state.users[name] && name !== me.username) return `❌ @${name} is already taken — pick another.`;
+      if (ISSUED_NAMES.has(name) && name !== me.username) return `❌ @${name} was issued to someone else — pick another.`;
+      if (name === me.username) return `You’re already @${name} 🙂`;
+      if (!renameUser(oldName, name)) return '❌ That rename failed — pick another name.';
+      if (/^user_[a-z0-9]{6}$/.test(oldName)) ISSUED_NAMES.add(oldName); // never recycle an old issued name
+      save();
+      for (const [otherWs, c] of clients) {
+        if (otherWs === ws || otherWs.readyState !== 1 || !c.username) continue;
+        send(otherWs, { type: 'user_renamed', from: oldName, to: name, user: state.users[name] });
+      }
+      send(ws, initPayload(name)); // full refresh for the renamed user
+      return `✅ Done — you’re now @${name}. Your history and groups came with you.`;
+    }
+    return `Unknown command “${cmd}”. Type /help to see what I can do.`;
   }
 
   /* ------------------------------ protocol ------------------------------ */
@@ -362,16 +442,7 @@ function createCore(persistence, options = {}) {
     // The built-in assistant greets every user with a guide DM (created once).
     ensureAssistantDm(username);
 
-    send(ws, {
-      type: 'init',
-      username,
-      channels: visibleChannels(username),
-      dms: myDms(username),
-      users: state.users,
-      online: onlineNames(),
-      now: Date.now(),
-      isOwner: state.users[username] && state.users[username].owner === true,
-    });
+    send(ws, initPayload(username));
     if (isNewlyOnline) broadcastPresence();
   }
 
@@ -471,9 +542,16 @@ function createCore(persistence, options = {}) {
         // Assistant auto-reply: any DM with GhostBot gets a guided answer.
         // Image-only messages get no auto-reply (nothing to answer yet).
         if (conv.type === 'dm' && conv.members.includes(BOT) && me.username !== BOT && text) {
+          let replyText;
+          if (text.trim().startsWith('/')) {
+            const oldName = me.username;
+            replyText = botCommand(text, ws, me, oldName);
+          } else {
+            replyText = botReply(text);
+          }
           const reply = {
             id: newId(), channel: conv.id, username: BOT, color: BOT_COLOR,
-            ts: Date.now() + 1, system: false, bot: true, text: botReply(text), reactions: {},
+            ts: Date.now() + 1, system: false, bot: true, text: replyText, reactions: {},
           };
           conv.messages.push(reply);
           if (conv.messages.length > MAX_MESSAGES_PER_CHANNEL) {
@@ -692,8 +770,8 @@ function createCore(persistence, options = {}) {
         const to = String(msg.to || '').toLowerCase();
         if (to === me.username) { send(ws, { type: 'error', message: "That's you!" }); return; }
         if (!state.users[to]) { send(ws, { type: 'error', message: `No user @${to}.` }); return; }
-        const id = dmIdFor(me.username, to);
-        let dm = getDm(id);
+        let dm = findDmBetween(me.username, to);
+        const id = dm ? dm.id : dmIdFor(me.username, to);
         let isNew = false;
         if (!dm) {
           dm = { id, type: 'dm', members: [me.username, to], createdAt: Date.now(), messages: [] };

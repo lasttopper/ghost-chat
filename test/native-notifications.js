@@ -58,11 +58,8 @@ const waitFor = (cond, timeout = 6000) => new Promise((resolve, reject) => {
     // log in as a guest
     await waitFor(() => $('#guest-btn') && !$('#login').classList.contains('hidden'));
     $('#guest-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    await waitFor(() => !$('#username-setup').classList.contains('hidden'));
-    $('#username-input').value = 'notifme';
-    $('#username-submit').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await waitFor(() => $('#me-status') && $('#me-status').textContent === 'online');
-    ok('app is online as @notifme');
+    ok('app is online (server auto-issued the username)');
 
     // simulate the app being backgrounded (page hidden)
     Object.defineProperty(window.document, 'hidden', { configurable: true, get: () => hidden });

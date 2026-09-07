@@ -526,6 +526,31 @@ function route(msg) {
       }
       renderSidebar();
       if (!getConv(S.active)) switchConv(msg.conv.id);
+      // A slash command typed in a regular chat is executed by GhostBot: once
+      // the bot DM is ready, deliver it there and show the answer.
+      if (pendingBotCommand && msg.conv.members.includes('ghostbot')) {
+        const cmd = pendingBotCommand;
+        pendingBotCommand = null;
+        send({ type: 'message', channel: msg.conv.id, text: cmd });
+        if (S.active !== msg.conv.id) switchConv(msg.conv.id);
+      }
+      break;
+    }
+    case 'user_renamed': {
+      // Someone changed their handle via GhostBot (/rename). Rewrite the name
+      // everywhere it appears locally: profile list, message authorship and
+      // memberships. DM ids stay stable, so conversations keep working.
+      const from = String(msg.from || ''), to = String(msg.to || '');
+      if (!from || !to) break;
+      if (S.users[from]) { S.users[to] = msg.user || S.users[from]; delete S.users[from]; }
+      for (const conv of [...S.channels, ...S.dms]) {
+        for (const m of conv.messages || []) if (m.username === from) m.username = to;
+        if (Array.isArray(conv.members)) conv.members = conv.members.map((x) => (x === from ? to : x));
+        if (Array.isArray(conv.admins)) conv.admins = conv.admins.map((x) => (x === from ? to : x));
+      }
+      if (S.me && S.me.username === from) S.me.username = to;
+      toast(`@${from} is now @${to}`);
+      renderAll();
       break;
     }
     case 'report_ack': toast('🚩 Report filed — sent to admins at midnight.'); break;
@@ -1386,11 +1411,40 @@ function initLightbox() {
   }, { passive: true });
 }
 
+let pendingBotCommand = null; // slash command awaiting the GhostBot DM
+
 function sendMessage() {
   const input = $('#input');
   const text = input.value.trim();
   const image = pendingImage;
   if ((!text && !image) || !S.active) return;
+  /* Slash commands always run on GhostBot: typed anywhere, they are routed to
+   * the bot DM (opening it first if needed) so they never leak into a group. */
+  if (text.startsWith('/') && !image) {
+    const conv = getConv(S.active);
+    const inBotDm = conv && conv.type === 'dm' && conv.members.includes('ghostbot');
+    if (!inBotDm) {
+      const botDm = S.dms.find((d) => d.members.includes('ghostbot'));
+      if (botDm) {
+        if (!send({ type: 'message', channel: botDm.id, text })) {
+          toast("You're offline — command not sent. It's still in the box.");
+          return;
+        }
+        input.value = '';
+        switchConv(botDm.id);
+        input.focus();
+        return;
+      }
+      pendingBotCommand = text;
+      if (!send({ type: 'dm_start', to: 'ghostbot' })) {
+        pendingBotCommand = null;
+        toast("You're offline — command not sent. It's still in the box.");
+        return;
+      }
+      input.value = '';
+      return;
+    }
+  }
   const msg = { type: 'message', channel: S.active, text };
   if (image) msg.image = image;
   if (!send(msg)) {
