@@ -339,7 +339,7 @@ public class MainActivity extends Activity {
         public boolean isNative() { return true; }
 
         @JavascriptInterface
-        public String getAppVersion() { return "2.5.0"; }
+        public String getAppVersion() { return "2.6.0"; }
 
         /** Raise the persistent foreground notification (keeps the app alive). */
         @JavascriptInterface
