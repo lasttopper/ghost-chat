@@ -1709,12 +1709,15 @@ function afterAuth() {
     S.me.color = savedColor;
     enterApp();
   } else {
-    // Brand-new identity (no name AND no color stored): go straight to the
-    // username setup. A fresh guest is per-browser and a first-time Firebase
-    // signup has nothing for the server to resolve yet, so there is nothing
-    // to wait for — and this avoids flashing the empty app shell first.
+    // Brand-new identity: enter straight away — the server ISSUES a unique
+    // username automatically (one-time grant, bound to this auth identity),
+    // so nobody is ever asked to pick one. The issued name comes back in
+    // init and is cached locally for every future boot. The setup screen
+    // remains only as a fallback (server explicitly asks via need_username
+    // or a cached name turns out to be taken).
     S.me.username = null;
-    showUsernameSetup('');
+    S.me.color = pickedColor;
+    enterApp();
   }
 }
 

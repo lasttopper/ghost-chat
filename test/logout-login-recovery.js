@@ -60,7 +60,7 @@ async function bootPage(seed) {
 }
 
 (async () => {
-  const username = 'recover_' + Math.random().toString(36).slice(2, 8);
+  let username = 'recover_' + Math.random().toString(36).slice(2, 8);
   let gid = null, color = null;
 
   /* ---------------- Phase A: login, then logout ---------------- */
@@ -75,13 +75,12 @@ async function bootPage(seed) {
     ok(vis('#login'), 'login screen shown');
 
     $('#guest-btn').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
-    await wait(500);
-    ok(vis('#username-setup'), 'username-setup shown for brand-new guest');
-
-    $('#username-input').value = username;
-    $('#username-submit').dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
     await wait(3000);
-    ok(vis('#app'), 'app shell visible after username submit');
+    ok(!vis('#username-setup'), 'brand-new guest is auto-named: NO username-setup screen');
+    ok(vis('#app'), 'app shell visible straight away');
+    const issued = meName(window.document).replace(/^@/, '').replace(/ \(guest\)$/, '');
+    ok(/^user_[a-z0-9]{6}$/.test(issued), 'server issued a one-time username @' + issued);
+    username = issued;
     ok(meName(window.document) === '@' + username + ' (guest)', '#me-card .me-name shows @' + username + ' (got ' + meName(window.document) + ')');
 
     gid = window.localStorage.getItem('ghost.guestId');

@@ -26,8 +26,7 @@ function shim(w) {
   await wait(2500);
   click('#guest-btn');
   await wait(400);
-  $('#username-input').value = 'ssu_' + Math.random().toString(36).slice(2, 8);
-  click('#username-submit');
+  // (no username step: the server auto-issues a unique handle on join)
 
   // wait until the app shell is up AND a conversation is active
   let ready = false;

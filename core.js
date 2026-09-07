@@ -157,6 +157,19 @@ const validUsername = (u) => USERNAME_RE.test(String(u || '').toLowerCase());
 
 const newInviteCode = () => crypto.randomBytes(6).toString('base64url'); // ~8 chars
 
+/* One-time username issuance: a first-time identity is assigned a unique
+ * handle automatically instead of being asked for one. Never reused. */
+const ISSUED_NAMES = new Set();
+function issueUsername(users) {
+  for (let i = 0; i < 60; i++) {
+    const name = 'user_' + crypto.randomBytes(3).toString('hex'); // user_a1b2c3
+    if (!users[name] && !ISSUED_NAMES.has(name)) { ISSUED_NAMES.add(name); return name; }
+  }
+  const fallback = 'user_' + crypto.randomBytes(6).toString('hex').slice(0, 10);
+  ISSUED_NAMES.add(fallback);
+  return fallback;
+}
+
 /* ------------------------------- core ------------------------------- */
 
 function createCore(persistence, options = {}) {
@@ -423,7 +436,10 @@ function createCore(persistence, options = {}) {
           const known = Object.keys(state.users).find((u) => state.users[u].authId === authId);
           if (known) rawName = known;
         }
-        if (!rawName) { send(ws, { type: 'need_username' }); return; }
+        // No remembered handle: issue a unique one automatically. The name is
+        // then bound to this auth identity, so it is granted exactly once and
+        // recovered on every later login.
+        if (!rawName) rawName = issueUsername(state.users);
         const ok = admitUsername(ws, { ...msg, username: rawName, authId, email, verified });
         if (!ok) return;
         await ready;

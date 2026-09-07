@@ -185,8 +185,8 @@ function dumpLS(window) {
 
     await wait(2500);
     ok(!vis('#login'), 'pre-username firebase refresh: login screen NOT shown');
-    ok(vis('#username-setup'), 'pre-username firebase refresh: username-setup shown (resumed, not bounced to login)');
-    ok(!vis('#app'), 'pre-username firebase refresh: app not shown yet (no username)');
+    ok(!vis('#username-setup'), 'pre-username firebase refresh: NO username screen (server auto-issues a name)');
+    ok(vis('#app'), 'pre-username firebase refresh: enters the app with the issued name');
     dom.window.close();
   }
 

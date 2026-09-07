@@ -22,23 +22,25 @@ function shimMatchMedia(w) {
 }
 
 (async () => {
+  // Simulate a legacy account whose locally cached handle is now RESERVED:
+  // the session marker resumes it and the client re-joins with "admin",
+  // which the server rejects with need_username (the one remaining path
+  // that surfaces the setup screen, since first-timers are auto-named).
+  const staleAuthId = 'stale-' + Math.random().toString(36).slice(2, 10);
+  const seed = (window) => {
+    shimMatchMedia(window);
+    window.localStorage.setItem('ghost.session', JSON.stringify({ authId: staleAuthId, mode: 'guest', email: '', displayName: '' }));
+    window.localStorage.setItem('ghost.usernameFor.' + staleAuthId, 'admin');
+  };
   const vc = new VirtualConsole();
   vc.on('jsdomError', (e) => { if (!/Not implemented/i.test(e.message)) console.log('  JSDOM ERROR:', e.message); });
-  const dom = await JSDOM.fromURL(url, { runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true, virtualConsole: vc, beforeParse: shimMatchMedia });
+  const dom = await JSDOM.fromURL(url, { runScripts: 'dangerously', resources: 'usable', pretendToBeVisual: true, virtualConsole: vc, beforeParse: seed });
   const { window } = dom;
   const $ = (s) => window.document.querySelector(s);
   const vis = (s) => { const el = $(s); return !!el && !el.classList.contains('hidden'); };
   const click = (s) => $(s).dispatchEvent(new window.MouseEvent('click', { bubbles: true }));
 
-  await wait(2500);
-  click('#guest-btn');            // guest login -> username setup screen
-  await wait(500);
-  ok(vis('#username-setup'), 'a fresh guest lands on the username-setup screen');
-
-  // Submit a RESERVED name. The server rejects it; the client must NOT hang.
-  $('#username-input').value = 'admin';
-  click('#username-submit');
-  await wait(3000);               // allow the WS round-trip
+  await wait(4000);               // resume -> join 'admin' -> need_username
 
   ok(vis('#username-setup'), 'reserved name -> bounced back to the setup screen (NOT stuck)');
   ok(!vis('#app'), 'app shell is not left hanging on "connecting…"');
